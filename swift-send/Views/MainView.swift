@@ -26,11 +26,23 @@ struct MainView: View {
                                     ChatRow(chat: chat)
                                 }
                             }
+                            .onDelete { indexSet in
+                                indexSet.forEach { index in
+                                    viewModel.deleteChat(viewModel.chats[index])
+                                }
+                            }
                         }
                         
                         Section("Action Items") {
                             ForEach(viewModel.actionItems) { item in
-                                ActionItemRow(item: item)
+                                ActionItemRow(item: item, onToggle: {
+                                    viewModel.toggleActionItem(item)
+                                })
+                            }
+                            .onDelete { indexSet in
+                                indexSet.forEach { index in
+                                    viewModel.deleteActionItem(viewModel.actionItems[index])
+                                }
                             }
                         }
                     }
@@ -129,11 +141,15 @@ struct ChatRow: View {
 // MARK: - Action Item Row
 struct ActionItemRow: View {
     let item: ActionItem
+    let onToggle: () -> Void
     
     var body: some View {
         HStack {
-            Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                .foregroundColor(item.isCompleted ? .green : .gray)
+            Button(action: onToggle) {
+                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(item.isCompleted ? .green : .gray)
+            }
+            .buttonStyle(.plain)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)

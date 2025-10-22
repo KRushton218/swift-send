@@ -15,6 +15,7 @@ class MainViewModel: ObservableObject {
     @Published var isLoading = false
     
     private var realtimeManager = RealtimeManager()
+    private var messagingManager = MessagingManager()
     private var chatHandle: DatabaseHandle?
     private var actionItemHandle: DatabaseHandle?
     private var userId: String?
@@ -62,6 +63,42 @@ class MainViewModel: ObservableObject {
                     chatId: itemData["chatId"] as? String
                 )
             }.sorted { !$0.isCompleted && $1.isCompleted }
+        }
+    }
+    
+    func deleteChat(_ chat: Chat) {
+        guard let userId = userId else { return }
+        
+        Task {
+            do {
+                try await messagingManager.deleteChat(chatId: chat.id, userId: userId)
+            } catch {
+                print("Error deleting chat: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    func deleteActionItem(_ item: ActionItem) {
+        guard let userId = userId else { return }
+        
+        Task {
+            do {
+                try await messagingManager.deleteActionItem(userId: userId, actionItemId: item.id)
+            } catch {
+                print("Error deleting action item: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    func toggleActionItem(_ item: ActionItem) {
+        guard let userId = userId else { return }
+        
+        Task {
+            do {
+                try await messagingManager.toggleActionItemCompletion(userId: userId, actionItemId: item.id, isCompleted: !item.isCompleted)
+            } catch {
+                print("Error toggling action item: \(error.localizedDescription)")
+            }
         }
     }
     

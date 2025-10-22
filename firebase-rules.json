@@ -2,14 +2,20 @@
   "rules": {
     "users": {
       "$uid": {
-        ".read": "$uid === auth.uid",
-        ".write": "$uid === auth.uid"
+        "chats": {
+          ".read": "$uid === auth.uid",
+          ".write": "auth != null"
+        },
+        "actionItems": {
+          ".read": "$uid === auth.uid",
+          ".write": "$uid === auth.uid"
+        }
       }
     },
     "userProfiles": {
       "$uid": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        ".write": "$uid === auth.uid"
       }
     },
     "chats": {
@@ -21,7 +27,8 @@
         "messages": {
           ".read": "auth != null",
           "$messageId": {
-            ".write": "auth != null"
+            ".write": "auth != null",
+            ".validate": "newData.exists() || data.child('senderId').val() === auth.uid"
           }
         }
       }

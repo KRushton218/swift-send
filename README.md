@@ -9,6 +9,7 @@ A real-time messaging app for iOS with action item management, built with SwiftU
 - **Action Items** - Convert messages to tasks, track completion
 - **Unread Tracking** - Badge counts for unread messages
 - **Message Types** - Text, action items, and system messages
+- **Delete Functionality** - Remove chats, messages, and action items
 
 ## Architecture
 
@@ -152,12 +153,35 @@ The project uses Swift Package Manager with:
 2. Select "Create Action Item"
 3. The message becomes a tracked task
 
+### Deleting Content
+
+**Delete Chats:**
+1. Swipe left on any chat in the main list
+2. Tap the delete button
+3. Chat is removed from your list only (other participants can still access the conversation)
+
+**Delete Messages:**
+1. Long-press your own message in a chat
+2. Select "Delete" from the context menu
+3. Message is permanently removed for all participants
+
+**Delete Action Items:**
+1. Swipe left on any action item
+2. Tap the delete button
+3. Action item is permanently removed
+
+**Toggle Action Items:**
+- Tap the circle icon next to any action item to mark it complete/incomplete
+
 ## Security
 
-- Users can only access their own data in `/users/{uid}`
-- All operations require authentication
-- User profiles are readable by authenticated users (for chat display)
-- Chat access controlled by authentication (development mode)
+- Users can only read their own chat lists and action items in `/users/{uid}`
+- Authenticated users can write to any user's chat list (required for creating chats and updating message metadata)
+- Users can only read and write their own action items
+- User profiles are readable by all authenticated users (for chat display)
+- Users can only edit their own profiles
+- Users can only delete their own messages (enforced via validation rule)
+- Global chat data in `/chats/{chatId}` is accessible to all authenticated users
 
 ## File Structure
 

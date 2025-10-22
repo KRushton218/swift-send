@@ -92,6 +92,16 @@ class ChatViewModel: ObservableObject {
         }
     }
     
+    func deleteMessage(_ message: Message) {
+        Task {
+            do {
+                try await messagingManager.deleteMessage(chatId: chatId, messageId: message.id)
+            } catch {
+                print("Error deleting message: \(error.localizedDescription)")
+            }
+        }
+    }
+    
     private func markAsRead() {
         Task {
             do {

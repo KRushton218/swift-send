@@ -30,6 +30,9 @@ struct ChatDetailView: View {
                                 isFromCurrentUser: message.isFromCurrentUser(userId: Auth.auth().currentUser?.uid ?? ""),
                                 onCreateActionItem: {
                                     viewModel.createActionItem(from: message)
+                                },
+                                onDeleteMessage: {
+                                    viewModel.deleteMessage(message)
                                 }
                             )
                             .id(message.id)
@@ -63,6 +66,7 @@ struct MessageBubble: View {
     let message: Message
     let isFromCurrentUser: Bool
     let onCreateActionItem: () -> Void
+    let onDeleteMessage: () -> Void
     
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
@@ -116,6 +120,14 @@ struct MessageBubble: View {
                                 UIPasteboard.general.string = message.text
                             } label: {
                                 Label("Copy", systemImage: "doc.on.doc")
+                            }
+                            
+                            if isFromCurrentUser {
+                                Button(role: .destructive) {
+                                    onDeleteMessage()
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                 }

@@ -121,5 +121,27 @@ class MessagingManager {
         
         return actionItemId
     }
+    
+    // MARK: - Delete Message
+    func deleteMessage(chatId: String, messageId: String) async throws {
+        try await realtimeManager.deleteData(at: "chats/\(chatId)/messages/\(messageId)")
+    }
+    
+    // MARK: - Delete Chat
+    func deleteChat(chatId: String, userId: String) async throws {
+        // Delete chat from user's chat list only
+        // The global chat data in /chats/{chatId} remains for other participants
+        try await realtimeManager.deleteData(at: "users/\(userId)/chats/\(chatId)")
+    }
+    
+    // MARK: - Delete Action Item
+    func deleteActionItem(userId: String, actionItemId: String) async throws {
+        try await realtimeManager.deleteData(at: "users/\(userId)/actionItems/\(actionItemId)")
+    }
+    
+    // MARK: - Toggle Action Item Completion
+    func toggleActionItemCompletion(userId: String, actionItemId: String, isCompleted: Bool) async throws {
+        try await realtimeManager.updateData(at: "users/\(userId)/actionItems/\(actionItemId)", data: ["isCompleted": isCompleted])
+    }
 }
 
