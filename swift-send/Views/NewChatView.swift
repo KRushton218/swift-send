@@ -16,6 +16,7 @@ struct NewChatView: View {
     @State private var errorMessage = ""
     
     private let messagingManager = MessagingManager()
+    private let profileManager = UserProfileManager()
     
     var body: some View {
         NavigationView {
@@ -67,9 +68,25 @@ struct NewChatView: View {
         
         Task {
             do {
-                // For now, we'll use email as the recipient ID
-                // In a real app, you'd look up the user by email first
-                let participants = [userId, recipientEmail]
+                // Look up the recipient by email
+                guard let recipientProfile = try await profileManager.findUserByEmail(email: recipientEmail) else {
+                    await MainActor.run {
+                        errorMessage = "User with email '\(recipientEmail)' not found"
+                        isCreating = false
+                    }
+                    return
+                }
+                
+                // Check if trying to chat with yourself
+                if recipientProfile.id == userId {
+                    await MainActor.run {
+                        errorMessage = "You cannot create a chat with yourself"
+                        isCreating = false
+                    }
+                    return
+                }
+                
+                let participants = [userId, recipientProfile.id]
                 
                 let chatId = try await messagingManager.createChat(
                     participants: participants,

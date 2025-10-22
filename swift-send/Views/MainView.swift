@@ -18,31 +18,27 @@ struct MainView: View {
         NavigationView {
             VStack {
                 // Chats Section
-                if !viewModel.chats.isEmpty {
+                if !viewModel.chats.isEmpty || !viewModel.actionItems.isEmpty {
                     List {
-                        Section("Chats") {
-                            ForEach(viewModel.chats) { chat in
-                                NavigationLink(destination: ChatDetailView(chat: chat, userId: authManager.user?.uid ?? "")) {
-                                    ChatRow(chat: chat)
+                        if !viewModel.chats.isEmpty {
+                            Section("Chats") {
+                                ForEach(viewModel.chats) { chat in
+                                    NavigationLink(destination: ChatDetailView(chat: chat, userId: authManager.user?.uid ?? "")) {
+                                        ChatRow(chat: chat)
+                                    }
                                 }
-                            }
-                            .onDelete { indexSet in
-                                indexSet.forEach { index in
-                                    viewModel.deleteChat(viewModel.chats[index])
-                                }
+                                .onDelete(perform: deleteChats)
                             }
                         }
                         
-                        Section("Action Items") {
-                            ForEach(viewModel.actionItems) { item in
-                                ActionItemRow(item: item, onToggle: {
-                                    viewModel.toggleActionItem(item)
-                                })
-                            }
-                            .onDelete { indexSet in
-                                indexSet.forEach { index in
-                                    viewModel.deleteActionItem(viewModel.actionItems[index])
+                        if !viewModel.actionItems.isEmpty {
+                            Section("Action Items") {
+                                ForEach(viewModel.actionItems) { item in
+                                    ActionItemRow(item: item, onToggle: {
+                                        viewModel.toggleActionItem(item)
+                                    })
                                 }
+                                .onDelete(perform: deleteActionItems)
                             }
                         }
                     }
@@ -100,6 +96,18 @@ struct MainView: View {
             .sheet(isPresented: $showingProfile) {
                 ProfileView()
             }
+        }
+    }
+    
+    private func deleteChats(at offsets: IndexSet) {
+        offsets.forEach { index in
+            viewModel.deleteChat(viewModel.chats[index])
+        }
+    }
+    
+    private func deleteActionItems(at offsets: IndexSet) {
+        offsets.forEach { index in
+            viewModel.deleteActionItem(viewModel.actionItems[index])
         }
     }
 }

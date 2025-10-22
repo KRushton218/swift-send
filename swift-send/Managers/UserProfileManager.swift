@@ -99,6 +99,34 @@ class UserProfileManager {
         return profiles
     }
     
+    // MARK: - Find User by Email
+    func findUserByEmail(email: String) async throws -> UserProfile? {
+        // Query all user profiles to find matching email
+        // Note: This is inefficient for large user bases. In production, use:
+        // - Firebase query with indexing on email field
+        // - Or a dedicated search service like Algolia
+        let snapshot = try await Database.database().reference().child("userProfiles").getData()
+        
+        guard let profiles = snapshot.value as? [String: [String: Any]] else {
+            return nil
+        }
+        
+        for (userId, profileData) in profiles {
+            if let userEmail = profileData["email"] as? String,
+               userEmail.lowercased() == email.lowercased() {
+                return UserProfile(
+                    id: userId,
+                    email: userEmail,
+                    displayName: profileData["displayName"] as? String ?? "User",
+                    photoURL: profileData["photoURL"] as? String,
+                    createdAt: Date(timeIntervalSince1970: profileData["createdAt"] as? TimeInterval ?? 0)
+                )
+            }
+        }
+        
+        return nil
+    }
+    
     // MARK: - Search Users
     func searchUsers(query: String) async throws -> [UserProfile] {
         // For now, this is a simple implementation
