@@ -82,13 +82,22 @@ Swift Send uses a sophisticated **dual-database architecture** that combines the
 #### Views
 - **`MainView`** - Conversation list with unread badges
 - **`ChatDetailView`** - Message thread with typing indicators & read receipts
-- **`NewChatView`** - Create new direct or group conversations
+- **`UnifiedMessageView`** - Single-screen new message flow (replaces multi-step wizard)
 - **`ProfileView`** - Edit user profile
 - **`ProfileSetupView`** - Initial onboarding flow
+
+#### Reusable Components
+- **`MessageBubble`** - Individual message display
+- **`TypingIndicatorView`** - Shows who's typing
+- **`ProfilePictureView`** - User avatars
+- **`MessageInputView`** - Message composition field
+- **`RecipientSelectorBar`** - Search and select recipients
+- **`ConversationPreviewArea`** - Shows messages or empty state
 
 #### ViewModels
 - **`MainViewModel`** - Conversation list state & Firestore listeners
 - **`ChatViewModel`** - Message state, RTDB listeners, presence & typing
+- **`UnifiedMessageViewModel`** - New message flow state & real-time conversation detection
 
 #### Utilities
 - **`DataSeeder`** - Generate sample data for testing
@@ -485,6 +494,13 @@ sequenceDiagram
 - [ ] User blocking & reporting
 - [ ] Message forwarding
 - [ ] Conversation pinning & muting (UI support)
+
+## 📚 Documentation
+
+- **[Unified Message Architecture](UNIFIED_MESSAGE_ARCHITECTURE.md)** - New single-screen message flow
+- **[AI Deletion Policy](AI_DELETION_POLICY.md)** - Per-user soft delete implementation
+- **[Firebase Setup](FIREBASE_SETUP.md)** - Firebase configuration guide
+- **[Deletion Implementation](DELETION_IMPLEMENTATION.md)** - Technical deletion details
 
 ## 📄 License
 
