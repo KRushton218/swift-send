@@ -3,6 +3,7 @@
 //  swift-send
 //
 //  Created by Kiran Rushton on 10/23/25.
+//  Simplified to use onlineUsers set for fast presence checks.
 //
 
 import Foundation
@@ -10,21 +11,21 @@ import FirebaseDatabase
 import FirebaseAuth
 
 /// Manager for user presence tracking in RTDB
-/// Handles online/offline status and typing indicators
+/// Uses simple onlineUsers set for fast online/offline detection
 class PresenceManager {
     private let rtdb = Database.database().reference()
-    private var presenceRef: DatabaseReference?
+    private var onlineRef: DatabaseReference?
     private var connectedRef: DatabaseReference?
     private var connectionStateHandle: DatabaseHandle?
     
     // MARK: - Setup Presence
     
     /// Set up presence tracking for the current user
-    /// Automatically updates online/offline status based on connection
+    /// Automatically adds/removes user from onlineUsers set based on connection
     func setupPresence() {
         guard let userId = Auth.auth().currentUser?.uid else { return }
         
-        presenceRef = rtdb.child("presence").child(userId)
+        onlineRef = rtdb.child("onlineUsers").child(userId)
         connectedRef = Database.database().reference(withPath: ".info/connected")
         
         // Listen to connection state changes
@@ -33,81 +34,67 @@ class PresenceManager {
                   let connected = snapshot.value as? Bool,
                   connected else { return }
             
-            // When connected, set up disconnect handler
-            self.presenceRef?.onDisconnectUpdateChildValues([
-                "status": PresenceStatus.offline.rawValue,
-                "lastSeen": ServerValue.timestamp()
-            ])
+            // When connected, set up auto-removal on disconnect
+            self.onlineRef?.onDisconnectRemoveValue()
             
-            // Set online status
-            self.presenceRef?.updateChildValues([
-                "status": PresenceStatus.online.rawValue,
-                "lastSeen": ServerValue.timestamp()
-            ])
+            // Set online status (just set to true)
+            self.onlineRef?.setValue(true)
         }
     }
     
-    /// Update presence status manually
-    func updatePresenceStatus(_ status: PresenceStatus) async throws {
+    /// Manually go offline (removes from online set)
+    func goOffline() async throws {
         guard let userId = Auth.auth().currentUser?.uid else { return }
-        
-        try await rtdb.child("presence")
-            .child(userId)
-            .updateChildValues([
-                "status": status.rawValue,
-                "lastSeen": ServerValue.timestamp()
-            ])
+        try await rtdb.child("onlineUsers").child(userId).removeValue()
     }
     
-    /// Set current conversation user is viewing
-    func setCurrentConversation(_ conversationId: String?) async throws {
+    /// Manually go online (adds to online set)
+    func goOnline() async throws {
         guard let userId = Auth.auth().currentUser?.uid else { return }
-        
-        if let conversationId = conversationId {
-            try await rtdb.child("presence")
-                .child(userId)
-                .child("currentConversation")
-                .setValue(conversationId)
-        } else {
-            try await rtdb.child("presence")
-                .child(userId)
-                .child("currentConversation")
-                .removeValue()
+        try await rtdb.child("onlineUsers").child(userId).setValue(true)
+    }
+    
+    /// Clean up presence tracking
+    func cleanup() {
+        if let handle = connectionStateHandle {
+            connectedRef?.removeObserver(withHandle: handle)
         }
+        connectionStateHandle = nil
+        onlineRef = nil
+        connectedRef = nil
     }
     
-    /// Observe presence for a specific user
-    func observePresence(userId: String, completion: @escaping (UserPresence?) -> Void) -> DatabaseHandle {
-        return rtdb.child("presence")
+    // MARK: - Observe Presence
+    
+    /// Observe if a user is online (fast boolean check)
+    func observePresence(userId: String, completion: @escaping (Bool) -> Void) -> DatabaseHandle {
+        return rtdb.child("onlineUsers")
             .child(userId)
             .observe(.value) { snapshot in
-                guard let data = snapshot.value as? [String: Any],
-                      let presence = UserPresence(from: data) else {
-                    completion(nil)
-                    return
-                }
-                completion(presence)
+                completion(snapshot.exists())
             }
+    }
+    
+    /// Remove presence observer
+    func removePresenceObserver(userId: String, handle: DatabaseHandle) {
+        rtdb.child("onlineUsers")
+            .child(userId)
+            .removeObserver(withHandle: handle)
     }
     
     /// Observe presence for multiple users
     func observePresenceForUsers(
         userIds: [String],
-        completion: @escaping ([String: UserPresence]) -> Void
+        completion: @escaping ([String: Bool]) -> Void
     ) -> [String: DatabaseHandle] {
         var handles: [String: DatabaseHandle] = [:]
-        var presenceData: [String: UserPresence] = [:]
+        var presenceData: [String: Bool] = [:]
         
         for userId in userIds {
-            let handle = rtdb.child("presence")
+            let handle = rtdb.child("onlineUsers")
                 .child(userId)
                 .observe(.value) { snapshot in
-                    if let data = snapshot.value as? [String: Any],
-                       let presence = UserPresence(from: data) {
-                        presenceData[userId] = presence
-                    } else {
-                        presenceData.removeValue(forKey: userId)
-                    }
+                    presenceData[userId] = snapshot.exists()
                     completion(presenceData)
                 }
             handles[userId] = handle
@@ -116,16 +103,9 @@ class PresenceManager {
         return handles
     }
     
-    /// Remove presence observer
-    func removePresenceObserver(userId: String, handle: DatabaseHandle) {
-        rtdb.child("presence")
-            .child(userId)
-            .removeObserver(withHandle: handle)
-    }
+    // MARK: - Typing Indicators (kept separate, per-conversation)
     
-    // MARK: - Typing Indicators
-    
-    /// Set typing indicator for a conversation
+    /// Set typing indicator for current user in a conversation
     func setTypingIndicator(conversationId: String, isTyping: Bool) async throws {
         guard let userId = Auth.auth().currentUser?.uid else { return }
         
@@ -137,26 +117,17 @@ class PresenceManager {
         
         if isTyping {
             try await typingRef.setValue(ServerValue.timestamp())
-            // Auto-remove after 5 seconds on disconnect
-            try await typingRef.onDisconnectRemoveValue()
         } else {
             try await typingRef.removeValue()
         }
     }
     
-    /// Clear typing indicator
+    /// Clear typing indicator for current user
     func clearTypingIndicator(conversationId: String) async throws {
-        guard let userId = Auth.auth().currentUser?.uid else { return }
-        
-        try await rtdb.child("conversations")
-            .child(conversationId)
-            .child("metadata")
-            .child("typingUsers")
-            .child(userId)
-            .removeValue()
+        try await setTypingIndicator(conversationId: conversationId, isTyping: false)
     }
     
-    /// Observe typing indicators for a conversation
+    /// Observe typing indicators in a conversation
     func observeTypingIndicators(
         conversationId: String,
         completion: @escaping ([String]) -> Void
@@ -166,24 +137,26 @@ class PresenceManager {
             .child("metadata")
             .child("typingUsers")
             .observe(.value) { snapshot in
-                guard let userId = Auth.auth().currentUser?.uid,
-                      let typingDict = snapshot.value as? [String: Double] else {
+                guard let typingUsers = snapshot.value as? [String: Any] else {
                     completion([])
                     return
                 }
                 
+                // Filter out stale typing indicators (older than 5 seconds)
                 let currentTime = Date().timeIntervalSince1970 * 1000
+                let activeTypingUsers = typingUsers.compactMap { userId, timestamp -> String? in
+                    guard let timestamp = timestamp as? Double,
+                          currentTime - timestamp < 5000 else {
+                        return nil
+                    }
+                    return userId
+                }
                 
-                // Filter out stale typing indicators (older than 5 seconds) and current user
-                let typingUsers = typingDict
-                    .filter { currentTime - $0.value < 5000 && $0.key != userId }
-                    .map { $0.key }
-                
-                completion(typingUsers)
+                completion(activeTypingUsers)
             }
     }
     
-    /// Remove typing observer
+    /// Remove typing indicator observer
     func removeTypingObserver(conversationId: String, handle: DatabaseHandle) {
         rtdb.child("conversations")
             .child(conversationId)
@@ -191,34 +164,4 @@ class PresenceManager {
             .child("typingUsers")
             .removeObserver(withHandle: handle)
     }
-    
-    // MARK: - Cleanup
-    
-    /// Clean up presence tracking
-    func cleanup() {
-        guard Auth.auth().currentUser?.uid != nil else { return }
-        
-        // Remove connection state listener
-        if let handle = connectionStateHandle {
-            connectedRef?.removeObserver(withHandle: handle)
-        }
-        
-        // Set offline status
-        presenceRef?.updateChildValues([
-            "status": PresenceStatus.offline.rawValue,
-            "lastSeen": ServerValue.timestamp()
-        ])
-        
-        // Cancel disconnect handlers
-        presenceRef?.cancelDisconnectOperations()
-        
-        presenceRef = nil
-        connectedRef = nil
-        connectionStateHandle = nil
-    }
-    
-    deinit {
-        cleanup()
-    }
 }
-

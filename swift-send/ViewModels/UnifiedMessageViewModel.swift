@@ -11,6 +11,7 @@ import Foundation
 import FirebaseAuth
 import FirebaseDatabase
 import FirebaseFirestore
+import Combine
 
 @MainActor
 class UnifiedMessageViewModel: ObservableObject {
@@ -58,10 +59,7 @@ class UnifiedMessageViewModel: ObservableObject {
     init(currentUserId: String) {
         self.currentUserId = currentUserId
     }
-    
-    deinit {
-        cleanup()
-    }
+
     
     // MARK: - Recipient Management
     

@@ -43,12 +43,10 @@ class ChatViewModel: ObservableObject {
         setupTypingIndicators()
         setupPresenceMonitoring()
         markAsRead()
-        setCurrentConversation()
     }
     
     func cleanup() {
         stopListening()
-        clearCurrentConversation()
     }
     
     // MARK: - Load Data
@@ -226,10 +224,10 @@ class ChatViewModel: ObservableObject {
     
     private func setupPresenceForMembers(memberIds: [String]) async {
         for memberId in memberIds where memberId != userId {
-            let handle = presenceManager.observePresence(userId: memberId) { [weak self] presence in
+            let handle = presenceManager.observePresence(userId: memberId) { [weak self] isOnline in
                 guard let self = self else { return }
                 Task { @MainActor in
-                    if presence?.status == .online {
+                    if isOnline {
                         self.onlineMembers.insert(memberId)
                     } else {
                         self.onlineMembers.remove(memberId)
@@ -258,18 +256,6 @@ class ChatViewModel: ObservableObject {
             } catch {
                 print("Error marking as read: \(error.localizedDescription)")
             }
-        }
-    }
-    
-    private func setCurrentConversation() {
-        Task {
-            try? await presenceManager.setCurrentConversation(conversationId)
-        }
-    }
-    
-    private func clearCurrentConversation() {
-        Task {
-            try? await presenceManager.setCurrentConversation(nil)
         }
     }
     

@@ -41,7 +41,7 @@
       }
     },
     
-    "presence": {
+    "onlineUsers": {
       "$userId": {
         ".read": "auth != null",
         ".write": "$userId === auth.uid"
