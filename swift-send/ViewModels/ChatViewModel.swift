@@ -9,9 +9,11 @@
 import Foundation
 import FirebaseDatabase
 import Combine
+import OSLog
 
 @MainActor
 class ChatViewModel: ObservableObject {
+    private let logger = Logger(subsystem: "com.swiftsend.app", category: "ChatViewModel")
     @Published var messages: [Message] = []
     @Published var messageText: String = ""
     @Published var isLoading = false
@@ -30,13 +32,18 @@ class ChatViewModel: ObservableObject {
     private var userId: String
     private var typingTimer: Timer?
     private var isCurrentlyTyping = false
+    private var markAsReadTask: Task<Void, Never>?
+    private var lastMarkAsReadTime: Date?
+    private let markAsReadDebounceInterval: TimeInterval = 2.0 // Minimum 2 seconds between mark as read calls
     
     init(conversationId: String, userId: String) {
         self.conversationId = conversationId
         self.userId = userId
+        logger.info("🚀 ChatViewModel initialized for conversation: \(conversationId), user: \(userId)")
     }
     
     func setup() {
+        logger.info("⚙️ Setting up ChatViewModel for conversation: \(self.conversationId)")
         loadMessages()
         loadConversation()
         loadCurrentUserProfile()
@@ -46,6 +53,7 @@ class ChatViewModel: ObservableObject {
     }
     
     func cleanup() {
+        logger.info("🧹 Cleaning up ChatViewModel for conversation: \(self.conversationId)")
         stopListening()
     }
     
@@ -80,17 +88,22 @@ class ChatViewModel: ObservableObject {
     }
     
     func loadMessages() {
+        logger.debug("📥 Loading messages for conversation: \(self.conversationId)")
         isLoading = true
         
         // Observe active messages from RTDB (real-time)
         messageHandle = messagingManager.observeActiveMessages(conversationId: conversationId) { [weak self] messages in
             guard let self = self else { return }
             Task { @MainActor in
+                self.logger.info("📨 Received \(messages.count) messages for conversation")
                 self.messages = messages
                 self.isLoading = false
                 
                 // Mark new messages as delivered
                 await self.markNewMessagesAsDelivered(messages)
+                
+                // Mark conversation as read (clears unread count)
+                self.markAsRead()
             }
         }
     }
@@ -117,10 +130,15 @@ class ChatViewModel: ObservableObject {
     // MARK: - Send Message
     
     func sendMessage() {
-        guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            logger.debug("⚠️ Attempted to send empty message")
+            return
+        }
         
         let text = messageText
         messageText = "" // Clear input immediately
+        
+        logger.info("📤 Sending message to conversation: \(self.conversationId)")
         
         Task {
             do {
@@ -128,7 +146,9 @@ class ChatViewModel: ObservableObject {
                     conversationId: conversationId,
                     text: text
                 )
+                logger.info("✅ Message sent successfully")
             } catch {
+                logger.error("❌ Error sending message: \(error.localizedDescription)")
                 print("Error sending message: \(error.localizedDescription)")
                 // Restore message text on error
                 self.messageText = text
@@ -175,7 +195,8 @@ class ChatViewModel: ObservableObject {
         typingHandle = presenceManager.observeTypingIndicators(conversationId: conversationId) { [weak self] typingUserIds in
             guard let self = self else { return }
             Task { @MainActor in
-                self.typingUsers = typingUserIds
+                // Filter out current user - you should never see your own typing indicator
+                self.typingUsers = typingUserIds.filter { $0 != self.userId }
             }
         }
     }
@@ -250,11 +271,26 @@ class ChatViewModel: ObservableObject {
     }
     
     private func markAsRead() {
-        Task {
+        // Cancel any pending mark as read task
+        markAsReadTask?.cancel()
+        
+        // Check if we recently marked as read (debounce)
+        if let lastTime = lastMarkAsReadTime,
+           Date().timeIntervalSince(lastTime) < markAsReadDebounceInterval {
+            logger.debug("⏭️ Skipping markAsRead - called too recently (debounced)")
+            return
+        }
+        
+        // Update the last mark as read time
+        lastMarkAsReadTime = Date()
+        
+        markAsReadTask = Task {
             do {
+                logger.debug("📖 Marking conversation as read: \(self.conversationId)")
                 try await messagingManager.markConversationAsRead(conversationId: conversationId)
+                logger.info("✅ Successfully marked conversation as read")
             } catch {
-                print("Error marking as read: \(error.localizedDescription)")
+                logger.error("❌ Error marking conversation as read: \(error.localizedDescription)")
             }
         }
     }
@@ -262,14 +298,21 @@ class ChatViewModel: ObservableObject {
     // MARK: - Cleanup
     
     func stopListening() {
+        logger.debug("🔇 Stopping listeners for conversation: \(self.conversationId)")
+        
         if let handle = messageHandle {
+            logger.debug("🔇 Removing message observer")
             messagingManager.removeMessageObserver(conversationId: conversationId, handle: handle)
         }
         
         if let handle = typingHandle {
+            logger.debug("🔇 Removing typing observer")
             presenceManager.removeTypingObserver(conversationId: conversationId, handle: handle)
         }
         
+        if !presenceHandles.isEmpty {
+            logger.debug("🔇 Removing \(self.presenceHandles.count) presence observers")
+        }
         for (memberId, handle) in presenceHandles {
             presenceManager.removePresenceObserver(userId: memberId, handle: handle)
         }
@@ -277,6 +320,12 @@ class ChatViewModel: ObservableObject {
         
         typingTimer?.invalidate()
         typingTimer = nil
+        
+        // Cancel any pending mark as read task
+        markAsReadTask?.cancel()
+        markAsReadTask = nil
+        
+        logger.info("✅ All listeners stopped for conversation: \(self.conversationId)")
     }
     
     deinit {

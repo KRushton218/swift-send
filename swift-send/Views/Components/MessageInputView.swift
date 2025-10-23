@@ -14,28 +14,46 @@ struct MessageInputView: View {
     @Binding var messageText: String
     let onSend: () -> Void
     let onTextChanged: ((String) -> Void)?
-    
-    init(messageText: Binding<String>, onSend: @escaping () -> Void, onTextChanged: ((String) -> Void)? = nil) {
+    let isSendEnabled: Bool
+    private let focusBinding: FocusState<Bool>.Binding?
+
+    init(
+        messageText: Binding<String>,
+        isSendEnabled: Bool = true,
+        onSend: @escaping () -> Void,
+        onTextChanged: ((String) -> Void)? = nil,
+        focus: FocusState<Bool>.Binding? = nil
+    ) {
         self._messageText = messageText
+        self.isSendEnabled = isSendEnabled
         self.onSend = onSend
         self.onTextChanged = onTextChanged
+        self.focusBinding = focus
     }
-    
+
     var body: some View {
-        HStack(spacing: 12) {
-            TextField("Message", text: $messageText, axis: .vertical)
+        let trimmed = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let canSend = isSendEnabled && !trimmed.isEmpty
+
+        return HStack(spacing: 12) {
+            buildTextField()
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
-                .onChange(of: messageText) { oldValue, newValue in
+                .onChange(of: messageText) { _, newValue in
                     onTextChanged?(newValue)
                 }
-            
+                .onSubmit {
+                    if canSend {
+                        onSend()
+                    }
+                }
+
             Button(action: onSend) {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 32))
-                    .foregroundColor(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .gray : .blue)
+                    .foregroundColor(canSend ? .blue : .gray)
             }
-            .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(!canSend)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -47,5 +65,14 @@ struct MessageInputView: View {
             alignment: .top
         )
     }
-}
 
+    @ViewBuilder
+    private func buildTextField() -> some View {
+        if let focusBinding {
+            TextField("Message", text: $messageText, axis: .vertical)
+                .focused(focusBinding)
+        } else {
+            TextField("Message", text: $messageText, axis: .vertical)
+        }
+    }
+}

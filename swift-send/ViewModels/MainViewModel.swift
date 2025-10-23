@@ -10,10 +10,25 @@ import Foundation
 import FirebaseDatabase
 import FirebaseFirestore
 import Combine
+import OSLog
 
 @MainActor
 class MainViewModel: ObservableObject {
-    @Published var conversations: [Conversation] = []
+    private let logger = Logger(subsystem: "com.swiftsend.app", category: "MainViewModel")
+    
+    @Published var conversations: [Conversation] = [] {
+        didSet {
+            logger.info("🔄 conversations array changed: \(oldValue.count) → \(self.conversations.count)")
+            if oldValue.count == conversations.count {
+                logger.debug("   Same count, checking IDs...")
+                let oldIds = oldValue.compactMap { $0.id }.sorted()
+                let newIds = conversations.compactMap { $0.id }.sorted()
+                if oldIds == newIds {
+                    logger.warning("   ⚠️ SAME conversations, but array was reassigned!")
+                }
+            }
+        }
+    }
     @Published var userConversationStatuses: [String: UserConversationStatus] = [:]
     @Published var mentionedMessages: [MentionedMessage] = []
     @Published var isLoading = false
@@ -52,12 +67,26 @@ class MainViewModel: ObservableObject {
         conversationListener = firestoreManager.observeUserConversations(memberIds: [userId]) { [weak self] conversations in
             guard let self = self else { return }
             Task { @MainActor in
+                self.logger.info("📥 Received \(conversations.count) conversations from Firestore")
+                
                 // Filter out hidden conversations
-                self.conversations = conversations.filter { conversation in
+                let filtered = conversations.filter { conversation in
                     guard let conversationId = conversation.id else { return true }
                     let status = self.userConversationStatuses[conversationId]
                     return !(status?.isHidden ?? false)
                 }
+                
+                // Only update if the conversations actually changed (compare IDs)
+                let oldIds = self.conversations.compactMap { $0.id }.sorted()
+                let newIds = filtered.compactMap { $0.id }.sorted()
+                
+                if oldIds != newIds {
+                    self.logger.info("   Conversations changed, updating array")
+                    self.conversations = filtered
+                } else {
+                    self.logger.debug("   Same conversations from Firestore, skipping array update")
+                }
+                
                 self.isLoading = false
             }
         }
@@ -69,28 +98,52 @@ class MainViewModel: ObservableObject {
         userConversationHandle = realtimeManager.observe(at: "userConversations/\(userId)") { [weak self] data in
             guard let self = self else { return }
             
+            self.logger.info("📊 Received user conversation statuses update")
+            
             var statuses: [String: UserConversationStatus] = [:]
+            var hasHiddenStatusChanged = false
+            
             for (conversationId, value) in data {
                 if let statusData = value as? [String: Any],
                    let status = UserConversationStatus(from: statusData) {
+                    
+                    // Check if hidden status changed (only if we had a previous status)
+                    let oldStatus = self.userConversationStatuses[conversationId]
+                    if let oldStatus = oldStatus, oldStatus.isHidden != status.isHidden {
+                        hasHiddenStatusChanged = true
+                        self.logger.info("   🔄 Hidden status changed for \(conversationId): \(oldStatus.isHidden) → \(status.isHidden)")
+                    }
+                    
                     statuses[conversationId] = status
                 }
             }
             
             Task { @MainActor in
                 self.userConversationStatuses = statuses
-                // Re-filter conversations when statuses change
-                self.filterConversations()
+                
+                // ✅ ONLY filter if hidden status actually changed
+                if hasHiddenStatusChanged {
+                    self.logger.debug("   Calling filterConversations() due to hidden status change")
+                    self.filterConversations()
+                } else {
+                    self.logger.debug("   Skipping filterConversations() - only read/count statuses changed")
+                }
             }
         }
     }
     
     private func filterConversations() {
+        self.logger.info("🔍 Filtering conversations (current count: \(self.conversations.count))")
+        let beforeCount = conversations.count
         // Filter out hidden conversations based on current statuses
         conversations = conversations.filter { conversation in
             guard let conversationId = conversation.id else { return true }
             let status = userConversationStatuses[conversationId]
             return !(status?.isHidden ?? false)
+        }
+        let afterCount = conversations.count
+        if beforeCount != afterCount {
+            self.logger.info("   Filtered out \(beforeCount - afterCount) hidden conversations")
         }
     }
     

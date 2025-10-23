@@ -8,6 +8,7 @@
 
 import SwiftUI
 import FirebaseAuth
+import OSLog
 
 struct ChatDetailView: View {
     let conversation: Conversation
@@ -15,10 +16,13 @@ struct ChatDetailView: View {
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
     
+    private let logger = Logger(subsystem: "com.swiftsend.app", category: "ChatDetailView")
+    
     init(conversation: Conversation, userId: String) {
         self.conversation = conversation
         self.currentUserId = userId
         _viewModel = StateObject(wrappedValue: ChatViewModel(conversationId: conversation.id ?? "", userId: userId))
+        Logger(subsystem: "com.swiftsend.app", category: "ChatDetailView").info("🎬 ChatDetailView init for conversation: \(conversation.id ?? "unknown")")
     }
     
     var body: some View {
@@ -79,25 +83,18 @@ struct ChatDetailView: View {
         .navigationTitle(getConversationDisplayName())
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            logger.info("👁️ ChatDetailView appeared for conversation: \(self.conversation.id ?? "unknown")")
             viewModel.setup()
         }
         .onDisappear {
+            logger.info("👋 ChatDetailView disappeared for conversation: \(self.conversation.id ?? "unknown")")
             viewModel.cleanup()
         }
     }
     
     private func getConversationDisplayName() -> String {
-        if conversation.type == .group {
-            return conversation.name ?? "Group Chat"
-        } else {
-            // For direct chats, show the other person's name
-            let otherMemberId = conversation.memberIds.first { $0 != currentUserId }
-            if let otherMemberId = otherMemberId,
-               let memberDetail = conversation.memberDetails[otherMemberId] {
-                return memberDetail.displayName
-            }
-            return "Chat"
-        }
+        // Use the safe display name from the Conversation model
+        return conversation.safeDisplayName(currentUserId: currentUserId)
     }
 }
 

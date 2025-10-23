@@ -15,7 +15,7 @@ enum ConversationType: String, Codable {
 }
 
 // MARK: - Conversation Model (Firestore)
-struct Conversation: Identifiable, Codable {
+struct Conversation: Identifiable, Codable, Equatable {
     @DocumentID var id: String?
     var type: ConversationType
     var name: String?
@@ -25,6 +25,11 @@ struct Conversation: Identifiable, Codable {
     var memberDetails: [String: MemberDetail]
     var lastMessage: LastMessage?
     var metadata: ConversationMetadata
+    
+    // Equatable implementation - compare by ID only for SwiftUI stability
+    static func == (lhs: Conversation, rhs: Conversation) -> Bool {
+        return lhs.id == rhs.id
+    }
     
     init(id: String? = nil, type: ConversationType, name: String? = nil, createdAt: Date = Date(), createdBy: String, memberIds: [String], memberDetails: [String: MemberDetail], lastMessage: LastMessage? = nil, metadata: ConversationMetadata = ConversationMetadata()) {
         self.id = id
@@ -38,7 +43,7 @@ struct Conversation: Identifiable, Codable {
         self.metadata = metadata
     }
     
-    struct MemberDetail: Codable {
+    struct MemberDetail: Codable, Equatable {
         var displayName: String
         var photoURL: String?
         var joinedAt: Date
@@ -50,7 +55,7 @@ struct Conversation: Identifiable, Codable {
         }
     }
     
-    struct LastMessage: Codable {
+    struct LastMessage: Codable, Equatable {
         var text: String
         var senderId: String
         var senderName: String
@@ -66,7 +71,7 @@ struct Conversation: Identifiable, Codable {
         }
     }
     
-    struct ConversationMetadata: Codable {
+    struct ConversationMetadata: Codable, Equatable {
         var totalMessages: Int
         var imageUrl: String?
         
@@ -91,11 +96,28 @@ extension Conversation {
     /// Safe display name with comprehensive fallback chain
     func safeDisplayName(currentUserId: String) -> String {
         if type == .group {
-            // Group chat: use name or fallback
+            // Group chat: use name or generate from participants
             if let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
                 return name
             }
-            return "Group Chat"
+            
+            // Generate name from participants (excluding current user)
+            let otherMembers = memberIds.filter { $0 != currentUserId }
+            let otherMemberNames = otherMembers.compactMap { memberId -> String? in
+                guard let memberDetail = memberDetails[memberId] else { return nil }
+                let name = memberDetail.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                return name.isEmpty ? nil : name
+            }
+            
+            if otherMemberNames.isEmpty {
+                return "Group Chat"
+            } else if otherMemberNames.count <= 3 {
+                // List names for small groups (1-3 people)
+                return otherMemberNames.joined(separator: ", ")
+            } else {
+                // "You and X people" for larger groups
+                return "You and \(otherMemberNames.count) people"
+            }
         } else {
             // Direct chat: find other member
             let otherMemberId = memberIds.first { $0 != currentUserId }
@@ -108,8 +130,8 @@ extension Conversation {
                 }
             }
             
-            // Fallback for direct chats
-            return "Chat"
+            // Fallback for direct chats - should rarely happen
+            return "Unknown User"
         }
     }
     
@@ -631,49 +653,6 @@ struct MentionedMessage: Identifiable, Codable {
     }
 }
 
-// MARK: - User Presence (RTDB)
-enum PresenceStatus: String, Codable {
-    case online
-    case offline
-    case away
-}
-
-struct UserPresence: Codable {
-    var status: PresenceStatus
-    var lastSeen: Double
-    var currentConversation: String?
-    
-    init(status: PresenceStatus, lastSeen: Double = Date().timeIntervalSince1970 * 1000, currentConversation: String? = nil) {
-        self.status = status
-        self.lastSeen = lastSeen
-        self.currentConversation = currentConversation
-    }
-    
-    // RTDB Conversion
-    init?(from dictionary: [String: Any]) {
-        guard let statusString = dictionary["status"] as? String,
-              let status = PresenceStatus(rawValue: statusString) else {
-            return nil
-        }
-        
-        self.status = status
-        self.lastSeen = dictionary["lastSeen"] as? Double ?? Date().timeIntervalSince1970 * 1000
-        self.currentConversation = dictionary["currentConversation"] as? String
-    }
-    
-    func toDictionary() -> [String: Any] {
-        var dict: [String: Any] = [
-            "status": status.rawValue,
-            "lastSeen": lastSeen
-        ]
-        
-        if let currentConversation = currentConversation {
-            dict["currentConversation"] = currentConversation
-        }
-        
-        return dict
-    }
-}
 
 // MARK: - Conversation Metadata (RTDB)
 struct ConversationRealtimeMetadata: Codable {

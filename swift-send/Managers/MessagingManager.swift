@@ -355,15 +355,44 @@ class MessagingManager {
     
     /// Mark all messages in conversation as read
     func markConversationAsRead(conversationId: String) async throws {
-        guard let userId = Auth.auth().currentUser?.uid else { return }
+        guard let userId = Auth.auth().currentUser?.uid else {
+            print("⚠️ Cannot mark as read: No authenticated user")
+            return
+        }
         
-        try await rtdb.child("userConversations")
+        print("📖 Marking conversation \(conversationId) as read for user \(userId)")
+        
+        // First, check if there are unread messages
+        let snapshot = try await rtdb.child("userConversations")
             .child(userId)
             .child(conversationId)
-            .updateChildValues([
-                "unreadCount": 0,
-                "lastReadTimestamp": ServerValue.timestamp()
-            ])
+            .child("unreadCount")
+            .getData()
+        
+        let currentUnreadCount = snapshot.value as? Int ?? 0
+        print("📊 Current unread count: \(currentUnreadCount)")
+        
+        // Only update lastReadTimestamp if there are unread messages
+        if currentUnreadCount > 0 {
+            print("🔄 Resetting unread count from \(currentUnreadCount) to 0")
+            try await rtdb.child("userConversations")
+                .child(userId)
+                .child(conversationId)
+                .updateChildValues([
+                    "unreadCount": 0,
+                    "lastReadTimestamp": ServerValue.timestamp()
+                ])
+            print("✅ Successfully reset unread count to 0")
+        } else {
+            print("✓ Already at 0 unread, ensuring it stays 0")
+            // Already caught up, just ensure unreadCount is 0 (no timestamp update)
+            try await rtdb.child("userConversations")
+                .child(userId)
+                .child(conversationId)
+                .updateChildValues([
+                    "unreadCount": 0
+                ])
+        }
     }
     
     // MARK: - Delete Operations

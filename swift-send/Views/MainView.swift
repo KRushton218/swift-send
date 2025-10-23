@@ -7,11 +7,16 @@
 
 import SwiftUI
 import FirebaseAuth
+import OSLog
 
 struct MainView: View {
     @EnvironmentObject var authManager: AuthManager
-    @StateObject private var viewModel = MainViewModel()
-    @State private var showingNewChat = false
+    @EnvironmentObject var viewModel: MainViewModel
+    @State private var showingNewChat = false {
+        didSet {
+            Logger(subsystem: "com.swiftsend.app", category: "MainView").info("🔄 showingNewChat changed: \(oldValue) → \(self.showingNewChat)")
+        }
+    }
     @State private var showingProfile = false
     
     var body: some View {
@@ -42,30 +47,25 @@ struct MainView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .padding(.top)
-                        
-                        // Add sample data button for testing
-                        Button("Add Sample Data") {
-                            if let userId = authManager.user?.uid {
-                                Task {
-                                    await DataSeeder().seedSampleData(for: userId)
-                                }
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .padding(.top, 8)
                     }
                     .padding()
                 } else {
                     // Conversation list
                     List {
                         ForEach(viewModel.validConversations) { conversation in
-                            NavigationLink(destination: ChatDetailView(conversation: conversation, userId: authManager.user?.uid ?? "")) {
+                            NavigationLink(
+                                destination: ChatDetailView(
+                                    conversation: conversation,
+                                    userId: authManager.user?.uid ?? ""
+                                )
+                            ) {
                                 ConversationRowView(
                                     conversation: conversation,
                                     viewModel: viewModel,
                                     currentUserId: authManager.user?.uid ?? ""
                                 )
                             }
+                            .id(conversation.id) // Stable ID to prevent re-initialization
                         }
                         .onDelete { indexSet in
                             for index in indexSet {
@@ -94,14 +94,6 @@ struct MainView: View {
                         Image(systemName: "plus.circle.fill")
                     }
                 }
-            }
-            .onAppear {
-                if let userId = authManager.user?.uid {
-                    viewModel.loadData(for: userId)
-                }
-            }
-            .onDisappear {
-                viewModel.cleanup()
             }
             .sheet(isPresented: $showingNewChat) {
                 UnifiedMessageView(currentUserId: authManager.user?.uid ?? "")

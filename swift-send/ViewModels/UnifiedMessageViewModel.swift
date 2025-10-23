@@ -12,9 +12,13 @@ import FirebaseAuth
 import FirebaseDatabase
 import FirebaseFirestore
 import Combine
+import OSLog
 
 @MainActor
 class UnifiedMessageViewModel: ObservableObject {
+    // MARK: - Debug Logging
+    
+    private let logger = Logger(subsystem: "com.swiftsend.app", category: "UnifiedMessageViewModel")
     // MARK: - Published Properties
     
     // Recipient management
@@ -58,6 +62,7 @@ class UnifiedMessageViewModel: ObservableObject {
     
     init(currentUserId: String) {
         self.currentUserId = currentUserId
+        logger.info("🚀 UnifiedMessageViewModel initialized for user: \(currentUserId)")
     }
 
     
@@ -70,6 +75,7 @@ class UnifiedMessageViewModel: ObservableObject {
             return
         }
         
+        logger.debug("🔍 Searching for users with query: '\(query)'")
         isSearching = true
         errorMessage = ""
         
@@ -81,9 +87,11 @@ class UnifiedMessageViewModel: ObservableObject {
                     user.id != currentUserId && !selectedRecipients.contains(where: { $0.id == user.id })
                 }
                 
+                logger.info("✅ Found \(filtered.count) users matching '\(query)'")
                 searchResults = filtered
                 isSearching = false
             } catch {
+                logger.error("❌ Search failed: \(error.localizedDescription)")
                 errorMessage = "Search failed: \(error.localizedDescription)"
                 isSearching = false
             }
@@ -95,10 +103,12 @@ class UnifiedMessageViewModel: ObservableObject {
         guard !selectedRecipients.contains(where: { $0.id == user.id }) else { return }
         guard user.id != currentUserId else { return }
         
+        logger.info("➕ Adding recipient: \(user.displayName) (\(user.id))")
         selectedRecipients.append(user)
         searchText = ""
         searchResults = []
         
+        logger.debug("👥 Total recipients: \(self.selectedRecipients.count)")
         // Check for existing conversation with new recipient set
         checkForExistingConversation()
     }
@@ -123,8 +133,10 @@ class UnifiedMessageViewModel: ObservableObject {
     
     /// Remove a recipient from the selection
     func removeRecipient(_ user: UserProfile) {
+        logger.info("➖ Removing recipient: \(user.displayName) (\(user.id))")
         selectedRecipients.removeAll { $0.id == user.id }
         
+        logger.debug("👥 Total recipients after removal: \(self.selectedRecipients.count)")
         // Re-check for existing conversation with updated recipient set
         checkForExistingConversation()
     }
@@ -141,12 +153,14 @@ class UnifiedMessageViewModel: ObservableObject {
     /// Check if conversation already exists with selected recipients
     private func checkForExistingConversation() {
         guard !selectedRecipients.isEmpty else {
+            logger.debug("🔄 No recipients selected, clearing conversation state")
             existingConversation = nil
             messages = []
             cleanup()
             return
         }
         
+        logger.info("🔍 Checking for existing conversation with \(self.selectedRecipients.count) recipients")
         isCheckingConversation = true
         errorMessage = ""
         
@@ -156,6 +170,8 @@ class UnifiedMessageViewModel: ObservableObject {
                 var memberIds = [currentUserId]
                 memberIds.append(contentsOf: selectedRecipients.map { $0.id })
                 
+                logger.debug("🔍 Looking for conversation with members: \(memberIds.joined(separator: ", "))")
+                
                 // Check if conversation exists
                 let existing = try await messagingManager.findConversationByParticipants(memberIds: memberIds)
                 
@@ -164,12 +180,15 @@ class UnifiedMessageViewModel: ObservableObject {
                 
                 // If conversation exists, load messages
                 if let conversation = existing {
+                    logger.info("✅ Found existing conversation: \(conversation.id ?? "unknown")")
                     loadConversationPreview(conversationId: conversation.id ?? "")
                 } else {
+                    logger.info("ℹ️ No existing conversation found - will create new one on first message")
                     messages = []
                     cleanup()
                 }
             } catch {
+                logger.error("❌ Error checking conversations: \(error.localizedDescription)")
                 errorMessage = "Error checking conversations: \(error.localizedDescription)"
                 isCheckingConversation = false
             }
@@ -178,18 +197,21 @@ class UnifiedMessageViewModel: ObservableObject {
     
     /// Load conversation preview (messages + real-time updates)
     private func loadConversationPreview(conversationId: String) {
+        logger.info("📥 Loading conversation preview for: \(conversationId)")
         isLoadingMessages = true
         
         // Clean up any existing observers
         cleanup()
         
         // Observe messages in real-time
+        logger.debug("👀 Setting up message observer for conversation: \(conversationId)")
         messageObserverHandle = messagingManager.observeActiveMessages(
             conversationId: conversationId,
             limit: 50
         ) { [weak self] messages in
             guard let self = self else { return }
             Task { @MainActor in
+                self.logger.info("📨 Received \(messages.count) messages for conversation")
                 self.messages = messages
                 self.isLoadingMessages = false
             }
@@ -206,12 +228,17 @@ class UnifiedMessageViewModel: ObservableObject {
     
     /// Send message (creates conversation if needed)
     func sendMessage() {
-        guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { 
+            logger.debug("⚠️ Attempted to send empty message")
+            return 
+        }
         guard !selectedRecipients.isEmpty else {
+            logger.warning("⚠️ Attempted to send message with no recipients")
             errorMessage = "Please select at least one recipient"
             return
         }
         
+        logger.info("📤 Sending message to \(self.selectedRecipients.count) recipients")
         isSending = true
         errorMessage = ""
         
@@ -221,11 +248,13 @@ class UnifiedMessageViewModel: ObservableObject {
             do {
                 if let conversation = existingConversation, let conversationId = conversation.id {
                     // Send to existing conversation
+                    logger.info("📨 Sending to existing conversation: \(conversationId)")
                     _ = try await messagingManager.sendMessage(
                         conversationId: conversationId,
                         text: trimmedMessage,
                         type: .text
                     )
+                    logger.info("✅ Message sent successfully to existing conversation")
                 } else {
                     // Create new conversation and send first message
                     var memberIds = [currentUserId]
@@ -236,6 +265,11 @@ class UnifiedMessageViewModel: ObservableObject {
                         ? (groupName.isEmpty ? autoGeneratedGroupName : groupName) 
                         : nil
                     
+                    logger.info("🆕 Creating new \(type.rawValue) conversation with \(memberIds.count) members")
+                    if let name = finalGroupName {
+                        logger.debug("📝 Group name: \(name)")
+                    }
+                    
                     let (conversationId, _) = try await messagingManager.createConversationAndSendMessage(
                         type: type,
                         name: finalGroupName,
@@ -244,12 +278,15 @@ class UnifiedMessageViewModel: ObservableObject {
                         messageText: trimmedMessage
                     )
                     
+                    logger.info("✅ Created conversation: \(conversationId)")
+                    
                     // Fetch the created conversation
                     let conversation = try await firestoreManager.getConversation(id: conversationId)
                     existingConversation = conversation
                     
                     // Start observing the new conversation
                     if let conversation = conversation {
+                        logger.debug("👀 Starting to observe new conversation")
                         loadConversationPreview(conversationId: conversation.id ?? "")
                     }
                 }
@@ -258,6 +295,7 @@ class UnifiedMessageViewModel: ObservableObject {
                 messageText = ""
                 isSending = false
             } catch {
+                logger.error("❌ Failed to send message: \(error.localizedDescription)")
                 errorMessage = "Failed to send message: \(error.localizedDescription)"
                 isSending = false
             }
@@ -357,9 +395,12 @@ class UnifiedMessageViewModel: ObservableObject {
     // MARK: - Cleanup
     
     func cleanup() {
+        logger.info("🧹 Cleaning up observers and listeners")
+        
         // Remove message observer
         if let handle = messageObserverHandle,
            let conversationId = existingConversation?.id {
+            logger.debug("🔇 Removing message observer for conversation: \(conversationId)")
             messagingManager.removeMessageObserver(conversationId: conversationId, handle: handle)
             messageObserverHandle = nil
         }
@@ -367,19 +408,28 @@ class UnifiedMessageViewModel: ObservableObject {
         // Remove typing observer
         if let handle = typingObserverHandle,
            let conversationId = existingConversation?.id {
+            logger.debug("🔇 Removing typing observer for conversation: \(conversationId)")
             presenceManager.removeTypingObserver(conversationId: conversationId, handle: handle)
             typingObserverHandle = nil
         }
         
         // Remove presence observers
+        if !presenceObservers.isEmpty {
+            logger.debug("🔇 Removing \(self.presenceObservers.count) presence observers")
+        }
         for (userId, handle) in presenceObservers {
             presenceManager.removePresenceObserver(userId: userId, handle: handle)
         }
         presenceObservers.removeAll()
         
         // Remove conversation listener
+        if conversationListener != nil {
+            logger.debug("🔇 Removing conversation listener")
+        }
         conversationListener?.remove()
         conversationListener = nil
+        
+        logger.info("✅ Cleanup complete")
     }
 }
 
