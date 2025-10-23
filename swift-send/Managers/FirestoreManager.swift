@@ -74,6 +74,31 @@ class FirestoreManager {
         }
     }
     
+    /// Observe a single conversation in real-time
+    /// Used by UnifiedMessageView to watch for conversation changes as recipients are added/removed
+    func observeConversation(
+        id: String,
+        completion: @escaping (Conversation?) -> Void
+    ) -> ListenerRegistration {
+        return db.collection("conversations")
+            .document(id)
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    print("Error observing conversation: \(error.localizedDescription)")
+                    completion(nil)
+                    return
+                }
+                
+                guard let snapshot = snapshot, snapshot.exists else {
+                    completion(nil)
+                    return
+                }
+                
+                let conversation = try? snapshot.data(as: Conversation.self)
+                completion(conversation)
+            }
+    }
+    
     /// Listen to conversations for a user (returns listener registration)
     func observeUserConversations(memberIds: [String], completion: @escaping ([Conversation]) -> Void) -> ListenerRegistration {
         // Use arrayContains with the first (current) user ID to satisfy security rules

@@ -156,6 +156,34 @@ class MessagingManager {
     
     // MARK: - Create Conversation
     
+    /// Create a new conversation AND send the first message atomically
+    /// This ensures conversation + first message happen together
+    /// Used by UnifiedMessageView for seamless conversation creation
+    func createConversationAndSendMessage(
+        type: ConversationType,
+        name: String?,
+        memberIds: [String],
+        createdBy: String,
+        messageText: String
+    ) async throws -> (conversationId: String, messageId: String) {
+        // 1. Create conversation
+        let conversationId = try await createConversation(
+            type: type,
+            name: name,
+            memberIds: memberIds,
+            createdBy: createdBy
+        )
+        
+        // 2. Send first message
+        let messageId = try await sendMessage(
+            conversationId: conversationId,
+            text: messageText,
+            type: .text
+        )
+        
+        return (conversationId, messageId)
+    }
+    
     /// Create a new conversation (group or direct)
     func createConversation(
         type: ConversationType,
