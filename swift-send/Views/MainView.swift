@@ -104,7 +104,7 @@ struct MainView: View {
                 viewModel.cleanup()
             }
             .sheet(isPresented: $showingNewChat) {
-                RecipientSelectionView(currentUserId: authManager.user?.uid ?? "")
+                UnifiedMessageView(currentUserId: authManager.user?.uid ?? "")
             }
             .sheet(isPresented: $showingProfile) {
                 ProfileView()
