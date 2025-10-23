@@ -8,6 +8,7 @@
 import SwiftUI
 import Firebase
 import FirebaseDatabase
+import FirebaseFirestore
 
 @main
 struct swift_sendApp: App {
@@ -18,6 +19,11 @@ struct swift_sendApp: App {
         
         // Enable offline persistence for Realtime Database
         Database.database().isPersistenceEnabled = true
+        
+        // Configure Firestore settings
+        let settings = FirestoreSettings()
+        settings.cacheSettings = PersistentCacheSettings(sizeBytes: FirestoreCacheSizeUnlimited as NSNumber)
+        Firestore.firestore().settings = settings
     }
     
     var body: some Scene {

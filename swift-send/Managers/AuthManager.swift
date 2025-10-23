@@ -73,9 +73,8 @@ class AuthManager: ObservableObject {
         do {
             let profile = try await profileManager.getUserProfile(userId: userId)
             await MainActor.run {
-                // If display name is just email prefix, prompt for setup
-                let emailPrefix = profile?.email.components(separatedBy: "@").first ?? ""
-                self.needsProfileSetup = profile?.displayName == emailPrefix
+                // Check if user has completed profile setup
+                self.needsProfileSetup = profile?.hasCompletedProfileSetup == false
             }
         } catch {
             print("Error checking profile setup: \(error.localizedDescription)")

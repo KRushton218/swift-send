@@ -16,43 +16,32 @@ struct MainView: View {
     
     var body: some View {
         NavigationView {
-            VStack {
-                // Chats Section
-                if !viewModel.chats.isEmpty || !viewModel.actionItems.isEmpty {
-                    List {
-                        if !viewModel.chats.isEmpty {
-                            Section("Chats") {
-                                ForEach(viewModel.chats) { chat in
-                                    NavigationLink(destination: ChatDetailView(chat: chat, userId: authManager.user?.uid ?? "")) {
-                                        ChatRow(chat: chat)
-                                    }
-                                }
-                                .onDelete(perform: deleteChats)
-                            }
-                        }
-                        
-                        if !viewModel.actionItems.isEmpty {
-                            Section("Action Items") {
-                                ForEach(viewModel.actionItems) { item in
-                                    ActionItemRow(item: item, onToggle: {
-                                        viewModel.toggleActionItem(item)
-                                    })
-                                }
-                                .onDelete(perform: deleteActionItems)
-                            }
-                        }
-                    }
-                } else {
+            Group {
+                if viewModel.isLoading {
+                    ProgressView("Loading conversations...")
+                } else if viewModel.validConversations.isEmpty {
+                    // Empty state
                     VStack(spacing: 20) {
-                        Image(systemName: "message.circle")
+                        Image(systemName: "message.fill")
                             .font(.system(size: 60))
                             .foregroundColor(.gray)
-                        Text("No chats yet")
+                        
+                        Text("No Conversations")
                             .font(.title2)
-                            .foregroundColor(.gray)
-                        Text("Start a conversation to get started")
+                            .fontWeight(.semibold)
+                        
+                        Text("Start a new conversation to get chatting")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                        
+                        Button {
+                            showingNewChat = true
+                        } label: {
+                            Label("New Chat", systemImage: "plus.circle.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.top)
                         
                         // Add sample data button for testing
                         Button("Add Sample Data") {
@@ -62,9 +51,30 @@ struct MainView: View {
                                 }
                             }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .padding(.top)
+                        .buttonStyle(.bordered)
+                        .padding(.top, 8)
                     }
+                    .padding()
+                } else {
+                    // Conversation list
+                    List {
+                        ForEach(viewModel.validConversations) { conversation in
+                            NavigationLink(destination: ChatDetailView(conversation: conversation, userId: authManager.user?.uid ?? "")) {
+                                ConversationRowView(
+                                    conversation: conversation,
+                                    viewModel: viewModel,
+                                    currentUserId: authManager.user?.uid ?? ""
+                                )
+                            }
+                        }
+                        .onDelete { indexSet in
+                            for index in indexSet {
+                                let conversation = viewModel.validConversations[index]
+                                viewModel.deleteConversation(conversation)
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
                 }
             }
             .navigationTitle("Swift Send")
@@ -90,95 +100,104 @@ struct MainView: View {
                     viewModel.loadData(for: userId)
                 }
             }
+            .onDisappear {
+                viewModel.cleanup()
+            }
             .sheet(isPresented: $showingNewChat) {
-                NewChatView(userId: authManager.user?.uid ?? "")
+                RecipientSelectionView(currentUserId: authManager.user?.uid ?? "")
             }
             .sheet(isPresented: $showingProfile) {
                 ProfileView()
             }
         }
     }
-    
-    private func deleteChats(at offsets: IndexSet) {
-        offsets.forEach { index in
-            viewModel.deleteChat(viewModel.chats[index])
-        }
-    }
-    
-    private func deleteActionItems(at offsets: IndexSet) {
-        offsets.forEach { index in
-            viewModel.deleteActionItem(viewModel.actionItems[index])
-        }
-    }
 }
 
-// MARK: - Chat Row
-struct ChatRow: View {
-    let chat: Chat
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(chat.title)
-                    .font(.headline)
-                Text(chat.lastMessage)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-                Text(chat.timestamp, style: .relative)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            if chat.unreadCount > 0 {
-                Text("\(chat.unreadCount)")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                    .padding(6)
-                    .background(Color.blue)
-                    .clipShape(Circle())
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
+// MARK: - Conversation Row View
 
-// MARK: - Action Item Row
-struct ActionItemRow: View {
-    let item: ActionItem
-    let onToggle: () -> Void
+struct ConversationRowView: View {
+    let conversation: Conversation
+    let viewModel: MainViewModel
+    let currentUserId: String
     
     var body: some View {
-        HStack {
-            Button(action: onToggle) {
-                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .foregroundColor(item.isCompleted ? .green : .gray)
+        HStack(spacing: 12) {
+            // Avatar
+            if let photoURL = viewModel.getConversationPhotoURL(conversation, currentUserId: currentUserId),
+               let url = URL(string: photoURL) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        ProgressView()
+                            .frame(width: 50, height: 50)
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 50, height: 50)
+                            .clipShape(Circle())
+                    case .failure:
+                        avatarFallback
+                    @unknown default:
+                        avatarFallback
+                    }
+                }
+            } else {
+                avatarFallback
             }
-            .buttonStyle(.plain)
             
+            // Content
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.title)
-                    .font(.body)
-                    .strikethrough(item.isCompleted)
-                
-                if let dueDate = item.dueDate {
-                    Text(dueDate, style: .date)
+                HStack {
+                    Text(viewModel.getConversationDisplayName(conversation, currentUserId: currentUserId))
+                        .font(.headline)
+                        .lineLimit(1)
+                    
+                    Spacer()
+                    
+                    Text(viewModel.formatTimestamp(viewModel.getLastMessageTimestamp(conversation)))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-            }
-            
-            Spacer()
-            
-            if item.priority == .high {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .foregroundColor(.red)
+                
+                HStack {
+                    Text(viewModel.getLastMessagePreview(conversation))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                    
+                    Spacer()
+                    
+                    // Unread badge
+                    if let conversationId = conversation.id {
+                        let unreadCount = viewModel.getUnreadCount(conversationId: conversationId)
+                        if unreadCount > 0 {
+                            Text("\(unreadCount)")
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.blue)
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
             }
         }
         .padding(.vertical, 4)
+    }
+    
+    private var avatarFallback: some View {
+        ZStack {
+            Circle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: 50, height: 50)
+            
+            Image(systemName: conversation.type == .group ? "person.3.fill" : "person.fill")
+                .foregroundColor(.gray)
+                .font(.system(size: 24))
+        }
     }
 }
 

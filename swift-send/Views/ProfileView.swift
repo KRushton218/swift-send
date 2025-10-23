@@ -92,8 +92,12 @@ struct ProfileView: View {
                 
                 Section {
                     Button(role: .destructive) {
-                        try? authManager.signOut()
+                        // Dismiss the sheet first to avoid view update issues
                         dismiss()
+                        // Sign out after a brief delay to let the sheet dismiss animation complete
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            try? authManager.signOut()
+                        }
                     } label: {
                         Text("Sign Out")
                     }

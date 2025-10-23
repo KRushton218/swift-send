@@ -9,13 +9,15 @@ import SwiftUI
 import FirebaseAuth
 
 struct ChatDetailView: View {
-    let chat: Chat
+    let conversation: Conversation
+    let currentUserId: String
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
     
-    init(chat: Chat, userId: String) {
-        self.chat = chat
-        _viewModel = StateObject(wrappedValue: ChatViewModel(chatId: chat.id, userId: userId))
+    init(conversation: Conversation, userId: String) {
+        self.conversation = conversation
+        self.currentUserId = userId
+        _viewModel = StateObject(wrappedValue: ChatViewModel(conversationId: conversation.id ?? "", userId: userId))
     }
     
     var body: some View {
@@ -24,18 +26,34 @@ struct ChatDetailView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {
+                        // Load more button at top
+                        if !viewModel.messages.isEmpty {
+                            Button("Load Earlier Messages") {
+                                viewModel.loadOlderMessages()
+                            }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.vertical, 8)
+                        }
+                        
                         ForEach(viewModel.messages) { message in
                             MessageBubble(
                                 message: message,
                                 isFromCurrentUser: message.isFromCurrentUser(userId: Auth.auth().currentUser?.uid ?? ""),
-                                onCreateActionItem: {
-                                    viewModel.createActionItem(from: message)
+                                conversation: viewModel.conversation,
+                                onStarMessage: {
+                                    viewModel.starMessage(message)
                                 },
                                 onDeleteMessage: {
                                     viewModel.deleteMessage(message)
                                 }
                             )
                             .id(message.id)
+                        }
+                        
+                        // Typing indicator
+                        if !viewModel.typingUsers.isEmpty {
+                            TypingIndicatorView(typingUserIds: viewModel.typingUsers, conversation: viewModel.conversation)
                         }
                     }
                     .padding()
@@ -53,11 +71,32 @@ struct ChatDetailView: View {
             // Message Input
             MessageInputView(
                 messageText: $viewModel.messageText,
-                onSend: viewModel.sendMessage
+                onSend: viewModel.sendMessage,
+                onTextChanged: viewModel.onTextChanged
             )
         }
-        .navigationTitle(chat.title)
+        .navigationTitle(getConversationDisplayName())
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            viewModel.setup()
+        }
+        .onDisappear {
+            viewModel.cleanup()
+        }
+    }
+    
+    private func getConversationDisplayName() -> String {
+        if conversation.type == .group {
+            return conversation.name ?? "Group Chat"
+        } else {
+            // For direct chats, show the other person's name
+            let otherMemberId = conversation.memberIds.first { $0 != currentUserId }
+            if let otherMemberId = otherMemberId,
+               let memberDetail = conversation.memberDetails[otherMemberId] {
+                return memberDetail.displayName
+            }
+            return "Chat"
+        }
     }
 }
 
@@ -65,8 +104,16 @@ struct ChatDetailView: View {
 struct MessageBubble: View {
     let message: Message
     let isFromCurrentUser: Bool
-    let onCreateActionItem: () -> Void
+    let conversation: Conversation?
+    let onStarMessage: () -> Void
     let onDeleteMessage: () -> Void
+    
+    var senderPhotoURL: String? {
+        if !isFromCurrentUser {
+            return conversation?.memberDetails[message.senderId]?.photoURL
+        }
+        return nil
+    }
     
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
@@ -74,11 +121,12 @@ struct MessageBubble: View {
             
             // Profile picture for other users
             if !isFromCurrentUser {
-                ProfilePictureView(size: 32)
+                ProfilePictureView(photoURL: senderPhotoURL, size: 32)
             }
             
             VStack(alignment: isFromCurrentUser ? .trailing : .leading, spacing: 4) {
-                if !isFromCurrentUser {
+                // Show sender name in group chats
+                if !isFromCurrentUser && conversation?.type == .group {
                     Text(message.senderName)
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -104,45 +152,124 @@ struct MessageBubble: View {
                         .cornerRadius(12)
                 } else {
                     // Regular Text Message
-                    Text(message.text)
-                        .padding(12)
-                        .background(isFromCurrentUser ? Color.blue : Color.gray.opacity(0.2))
-                        .foregroundColor(isFromCurrentUser ? .white : .primary)
-                        .cornerRadius(16)
-                        .contextMenu {
-                            Button {
-                                onCreateActionItem()
-                            } label: {
-                                Label("Create Action Item", systemImage: "checkmark.circle")
-                            }
-                            
-                            Button {
-                                UIPasteboard.general.string = message.text
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
-                            }
-                            
-                            if isFromCurrentUser {
-                                Button(role: .destructive) {
-                                    onDeleteMessage()
+                    VStack(alignment: isFromCurrentUser ? .trailing : .leading, spacing: 4) {
+                        Text(message.text)
+                            .padding(12)
+                            .background(isFromCurrentUser ? Color.blue : Color.gray.opacity(0.2))
+                            .foregroundColor(isFromCurrentUser ? .white : .primary)
+                            .cornerRadius(16)
+                            .contextMenu {
+                                Button {
+                                    onStarMessage()
                                 } label: {
-                                    Label("Delete", systemImage: "trash")
+                                    Label("Star Message", systemImage: "star.fill")
+                                }
+                                
+                                Button {
+                                    UIPasteboard.general.string = message.text
+                                } label: {
+                                    Label("Copy", systemImage: "doc.on.doc")
+                                }
+                                
+                                if isFromCurrentUser {
+                                    Button(role: .destructive) {
+                                        onDeleteMessage()
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
                                 }
                             }
+                        
+                        // Delivery/read status for current user's messages
+                        if isFromCurrentUser, let readBy = message.readBy {
+                            HStack(spacing: 4) {
+                                if readBy.count > 1 {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.caption2)
+                                        .foregroundColor(.blue)
+                                } else {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption2)
+                                        .foregroundColor(.gray)
+                                }
+                                Text(message.timestamp, style: .time)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        } else {
+                            Text(message.timestamp, style: .time)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
                         }
+                    }
                 }
-                
-                Text(message.timestamp, style: .time)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
             }
             
             // Spacer for current user's messages
             if isFromCurrentUser {
-                ProfilePictureView(size: 32)
+                if let currentUserProfile = conversation?.memberDetails[message.senderId] {
+                    ProfilePictureView(photoURL: currentUserProfile.photoURL, size: 32)
+                } else {
+                    ProfilePictureView(size: 32)
+                }
             }
             
             if !isFromCurrentUser { Spacer() }
+        }
+    }
+}
+
+// MARK: - Typing Indicator View
+struct TypingIndicatorView: View {
+    let typingUserIds: [String]
+    let conversation: Conversation?
+    
+    var typingText: String {
+        guard let conversation = conversation else { return "Someone is typing..." }
+        
+        let typingNames = typingUserIds.compactMap { userId in
+            conversation.memberDetails[userId]?.displayName
+        }
+        
+        if typingNames.isEmpty {
+            return "Someone is typing..."
+        } else if typingNames.count == 1 {
+            return "\(typingNames[0]) is typing..."
+        } else if typingNames.count == 2 {
+            return "\(typingNames[0]) and \(typingNames[1]) are typing..."
+        } else {
+            return "\(typingNames.count) people are typing..."
+        }
+    }
+    
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            ProfilePictureView(size: 32)
+            
+            HStack(spacing: 4) {
+                Text(typingText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                // Animated dots
+                ForEach(0..<3) { index in
+                    Circle()
+                        .fill(Color.secondary)
+                        .frame(width: 6, height: 6)
+                        .opacity(0.5)
+                        .animation(
+                            Animation.easeInOut(duration: 0.6)
+                                .repeatForever()
+                                .delay(Double(index) * 0.2),
+                            value: typingUserIds.count
+                        )
+                }
+            }
+            .padding(12)
+            .background(Color.gray.opacity(0.1))
+            .cornerRadius(16)
+            
+            Spacer()
         }
     }
 }
@@ -194,12 +321,22 @@ struct ProfilePictureView: View {
 struct MessageInputView: View {
     @Binding var messageText: String
     let onSend: () -> Void
+    let onTextChanged: ((String) -> Void)?
+    
+    init(messageText: Binding<String>, onSend: @escaping () -> Void, onTextChanged: ((String) -> Void)? = nil) {
+        self._messageText = messageText
+        self.onSend = onSend
+        self.onTextChanged = onTextChanged
+    }
     
     var body: some View {
         HStack(spacing: 12) {
             TextField("Message", text: $messageText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
+                .onChange(of: messageText) { oldValue, newValue in
+                    onTextChanged?(newValue)
+                }
             
             Button(action: onSend) {
                 Image(systemName: "arrow.up.circle.fill")
@@ -223,12 +360,15 @@ struct MessageInputView: View {
 #Preview {
     NavigationView {
         ChatDetailView(
-            chat: Chat(
+            conversation: Conversation(
                 id: "1",
-                title: "John Doe",
-                lastMessage: "Hey there!",
-                timestamp: Date(),
-                participants: ["user1", "user2"]
+                type: .direct,
+                name: nil,
+                createdBy: "user1",
+                memberIds: ["user1", "user2"],
+                memberDetails: [
+                    "user2": Conversation.MemberDetail(displayName: "John Doe")
+                ]
             ),
             userId: "user1"
         )

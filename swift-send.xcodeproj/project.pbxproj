@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		F381042B2EA984C4005F032A /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = F381042A2EA984C4005F032A /* FirebaseAuth */; };
 		F38104442EA989BF005F032A /* FirebaseDatabase in Frameworks */ = {isa = PBXBuildFile; productRef = F38104432EA989BF005F032A /* FirebaseDatabase */; };
+		F381050A2EA9BDFB005F032A /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = F38105092EA9BDFB005F032A /* FirebaseFirestore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,6 +60,7 @@
 			files = (
 				F38104442EA989BF005F032A /* FirebaseDatabase in Frameworks */,
 				F381042B2EA984C4005F032A /* FirebaseAuth in Frameworks */,
+				F381050A2EA9BDFB005F032A /* FirebaseFirestore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -129,6 +131,7 @@
 			packageProductDependencies = (
 				F381042A2EA984C4005F032A /* FirebaseAuth */,
 				F38104432EA989BF005F032A /* FirebaseDatabase */,
+				F38105092EA9BDFB005F032A /* FirebaseFirestore */,
 			);
 			productName = "swift-send";
 			productReference = F38103FF2EA9770F005F032A /* swift-send.app */;
@@ -620,6 +623,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F38104292EA984C4005F032A /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseDatabase;
+		};
+		F38105092EA9BDFB005F032A /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F38104292EA984C4005F032A /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

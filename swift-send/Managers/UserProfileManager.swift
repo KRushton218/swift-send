@@ -14,18 +14,21 @@ class UserProfileManager {
     
     // MARK: - Create/Update Profile
     func createUserProfile(userId: String, email: String, displayName: String? = nil, photoURL: String? = nil) async throws {
-        let profileData: [String: Any] = [
-            "email": email,
-            "displayName": displayName ?? email.components(separatedBy: "@").first ?? "User",
-            "photoURL": photoURL ?? "",
-            "createdAt": Date().timeIntervalSince1970
-        ]
+        let profile = UserProfile(
+            id: userId,
+            email: email,
+            displayName: displayName,
+            photoURL: photoURL
+        )
         
-        try await realtimeManager.setData(at: "userProfiles/\(userId)", data: profileData)
+        try await realtimeManager.setData(at: "userProfiles/\(userId)", data: profile.toDictionary())
     }
     
     func updateDisplayName(userId: String, displayName: String) async throws {
-        try await realtimeManager.updateData(at: "userProfiles/\(userId)", data: ["displayName": displayName])
+        try await realtimeManager.updateData(at: "userProfiles/\(userId)", data: [
+            "displayName": displayName,
+            "hasCompletedProfileSetup": true
+        ])
         
         // Also update Firebase Auth profile
         if let user = Auth.auth().currentUser {
@@ -60,25 +63,13 @@ class UserProfileManager {
                     )
                     // Retry getting the profile
                     if let data = try await realtimeManager.getData(at: "userProfiles/\(userId)") {
-                        return UserProfile(
-                            id: userId,
-                            email: data["email"] as? String ?? "",
-                            displayName: data["displayName"] as? String ?? "User",
-                            photoURL: data["photoURL"] as? String,
-                            createdAt: Date(timeIntervalSince1970: data["createdAt"] as? TimeInterval ?? 0)
-                        )
+                        return UserProfile(from: data, id: userId)
                     }
                 }
                 return nil
             }
             
-            return UserProfile(
-                id: userId,
-                email: data["email"] as? String ?? "",
-                displayName: data["displayName"] as? String ?? "User",
-                photoURL: data["photoURL"] as? String,
-                createdAt: Date(timeIntervalSince1970: data["createdAt"] as? TimeInterval ?? 0)
-            )
+            return UserProfile(from: data, id: userId)
         } catch {
             // If offline, return nil gracefully instead of throwing
             print("Error fetching user profile: \(error.localizedDescription)")
@@ -114,13 +105,7 @@ class UserProfileManager {
         for (userId, profileData) in profiles {
             if let userEmail = profileData["email"] as? String,
                userEmail.lowercased() == email.lowercased() {
-                return UserProfile(
-                    id: userId,
-                    email: userEmail,
-                    displayName: profileData["displayName"] as? String ?? "User",
-                    photoURL: profileData["photoURL"] as? String,
-                    createdAt: Date(timeIntervalSince1970: profileData["createdAt"] as? TimeInterval ?? 0)
-                )
+                return UserProfile(from: profileData, id: userId)
             }
         }
         
@@ -128,13 +113,74 @@ class UserProfileManager {
     }
     
     // MARK: - Search Users
-    func searchUsers(query: String) async throws -> [UserProfile] {
-        // For now, this is a simple implementation
-        // In production, you'd want to use Firebase's querying capabilities
-        // or a dedicated search service like Algolia
+    func searchUsers(query: String, limit: Int = 20) async throws -> [UserProfile] {
+        guard !query.isEmpty else { return [] }
         
-        // This is a placeholder - you'd need to implement proper search
-        return []
+        let snapshot = try await Database.database().reference().child("userProfiles").getData()
+        guard let profiles = snapshot.value as? [String: [String: Any]] else {
+            return []
+        }
+        
+        let lowercaseQuery = query.lowercased()
+        var matchedProfiles: [UserProfile] = []
+        
+        for (userId, profileData) in profiles {
+            guard let profile = UserProfile(from: profileData, id: userId) else { continue }
+            
+            // Search by display name (case-insensitive, partial match)
+            let displayNameMatch = profile.displayName.lowercased().contains(lowercaseQuery)
+            
+            // Search by email (case-insensitive, partial match)
+            let emailMatch = profile.email.lowercased().contains(lowercaseQuery)
+            
+            if displayNameMatch || emailMatch {
+                matchedProfiles.append(profile)
+            }
+            
+            // Limit results
+            if matchedProfiles.count >= limit {
+                break
+            }
+        }
+        
+        // Sort by relevance: exact matches first, then partial matches
+        matchedProfiles.sort { profile1, profile2 in
+            let name1Lower = profile1.displayName.lowercased()
+            let name2Lower = profile2.displayName.lowercased()
+            let email1Lower = profile1.email.lowercased()
+            let email2Lower = profile2.email.lowercased()
+            
+            // Exact display name match gets highest priority
+            if name1Lower == lowercaseQuery && name2Lower != lowercaseQuery {
+                return true
+            }
+            if name2Lower == lowercaseQuery && name1Lower != lowercaseQuery {
+                return false
+            }
+            
+            // Exact email match gets second priority
+            if email1Lower == lowercaseQuery && email2Lower != lowercaseQuery {
+                return true
+            }
+            if email2Lower == lowercaseQuery && email1Lower != lowercaseQuery {
+                return false
+            }
+            
+            // Display name starts with query
+            let name1Starts = name1Lower.hasPrefix(lowercaseQuery)
+            let name2Starts = name2Lower.hasPrefix(lowercaseQuery)
+            if name1Starts && !name2Starts {
+                return true
+            }
+            if name2Starts && !name1Starts {
+                return false
+            }
+            
+            // Otherwise alphabetical by display name
+            return profile1.displayName < profile2.displayName
+        }
+        
+        return matchedProfiles
     }
 }
 

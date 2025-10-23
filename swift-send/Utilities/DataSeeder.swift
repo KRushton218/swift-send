@@ -3,10 +3,12 @@
 //  swift-send
 //
 //  Created by Kiran Rushton on 10/22/25.
+//  Updated for hybrid architecture on 10/23/25.
 //
 
 import Foundation
 import FirebaseDatabase
+import FirebaseFirestore
 
 class DataSeeder {
     private let realtimeManager = RealtimeManager()
@@ -15,120 +17,84 @@ class DataSeeder {
     
     func seedSampleData(for userId: String) async {
         do {
-            // Create demo user profiles
-            try await profileManager.createUserProfile(
-                userId: "demo_user_1",
-                email: "alice@example.com",
-                displayName: "Alice"
-            )
+            print("🌱 Starting to seed sample data...")
+            print("⚠️  Note: Seeding data with current user only (demo users require separate authentication)")
             
-            try await profileManager.createUserProfile(
-                userId: "demo_user_2",
-                email: "bob@example.com",
-                displayName: "Bob"
-            )
-            
-            // Create first chat with messages
-            let chat1Id = try await messagingManager.createChat(
-                participants: [userId, "demo_user_1"],
-                title: "Project Planning",
+            // Create a personal note/reminder conversation
+            print("Creating personal notes conversation...")
+            let notesId = try await messagingManager.createConversation(
+                type: .direct,
+                name: "Personal Notes",
+                memberIds: [userId],
                 createdBy: userId
             )
             
-            // Add messages to first chat
+            // Add some sample notes
+            try await Task.sleep(nanoseconds: 100_000_000)
             _ = try await messagingManager.sendMessage(
-                chatId: chat1Id,
-                senderId: "demo_user_1",
-                senderName: "Alice",
-                text: "Hey! How's the project coming along?"
-            )
-            
-            try await Task.sleep(nanoseconds: 100_000_000) // Small delay
-            
-            _ = try await messagingManager.sendMessage(
-                chatId: chat1Id,
-                senderId: userId,
-                senderName: "You",
-                text: "Going well! Just finishing up the authentication flow."
+                conversationId: notesId,
+                text: "Welcome to Swift Send! 🚀"
             )
             
             try await Task.sleep(nanoseconds: 100_000_000)
-            
             _ = try await messagingManager.sendMessage(
-                chatId: chat1Id,
-                senderId: "demo_user_1",
-                senderName: "Alice",
-                text: "Great! Let's discuss the timeline for the new feature"
-            )
-            
-            // Create second chat with messages
-            let chat2Id = try await messagingManager.createChat(
-                participants: [userId, "demo_user_2"],
-                title: "Team Standup",
-                createdBy: userId
-            )
-            
-            _ = try await messagingManager.sendMessage(
-                chatId: chat2Id,
-                senderId: "demo_user_2",
-                senderName: "Bob",
-                text: "Morning! Ready for standup?"
+                conversationId: notesId,
+                text: "This is a sample conversation to demonstrate the app's features."
             )
             
             try await Task.sleep(nanoseconds: 100_000_000)
-            
             _ = try await messagingManager.sendMessage(
-                chatId: chat2Id,
-                senderId: userId,
-                senderName: "You",
-                text: "Yes! Daily sync at 10 AM"
-            )
-            
-            // Add sample action items
-            // Link action item 1 to Project Planning chat
-            let actionItem1Data: [String: Any] = [
-                "title": "Review pull request #123",
-                "isCompleted": false,
-                "dueDate": Date().addingTimeInterval(86400).timeIntervalSince1970,
-                "priority": "high",
-                "chatId": chat1Id
-            ]
-            
-            // Link action item 2 to Team Standup chat
-            let actionItem2Data: [String: Any] = [
-                "title": "Update documentation",
-                "isCompleted": false,
-                "dueDate": Date().addingTimeInterval(172800).timeIntervalSince1970,
-                "priority": "medium",
-                "chatId": chat2Id
-            ]
-            
-            // Action item 3 - no due date, no chat link
-            let actionItem3Data: [String: Any] = [
-                "title": "Fix bug in login flow",
-                "isCompleted": true,
-                "priority": "high",
-                "dueDate": 0
-            ]
-            
-            _ = try await realtimeManager.createItem(
-                at: "users/\(userId)/actionItems",
-                data: actionItem1Data
-            )
-            
-            _ = try await realtimeManager.createItem(
-                at: "users/\(userId)/actionItems",
-                data: actionItem2Data
-            )
-            
-            _ = try await realtimeManager.createItem(
-                at: "users/\(userId)/actionItems",
-                data: actionItem3Data
+                conversationId: notesId,
+                text: "To chat with others, they need to create accounts and you can start conversations with them."
             )
             
             print("✅ Sample data seeded successfully!")
+            print("   - Created 1 personal notes conversation")
+            print("   - Added 3 sample messages")
+            print("")
+            print("💡 To test with multiple users:")
+            print("   1. Create additional Firebase Auth accounts")
+            print("   2. Log in with different accounts on separate devices/simulators")
+            print("   3. Use the 'New Chat' button to start conversations")
         } catch {
             print("❌ Error seeding data: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Seed data for testing the new hybrid architecture
+    /// Creates a large conversation with many messages to test pagination
+    func seedHybridArchitectureTest(for userId: String) async {
+        do {
+            print("🔬 Seeding hybrid architecture test data...")
+            
+            // Create a test conversation with just the current user
+            let testGroupId = try await messagingManager.createConversation(
+                type: .direct,
+                name: "Architecture Test",
+                memberIds: [userId],
+                createdBy: userId
+            )
+            
+            // Send 60 messages to test pagination and archiving
+            print("Creating 60 test messages...")
+            for i in 1...60 {
+                try await Task.sleep(nanoseconds: 50_000_000)
+                
+                _ = try await messagingManager.sendMessage(
+                    conversationId: testGroupId,
+                    text: "Test message #\(i) - Testing hybrid RTDB + Firestore architecture with pagination and automatic archiving after 50 messages"
+                )
+                
+                if i % 10 == 0 {
+                    print("  Created \(i)/60 messages...")
+                }
+            }
+            
+            print("✅ Hybrid architecture test data seeded successfully!")
+            print("   - Created 1 test conversation")
+            print("   - Added 60 messages (50 active in RTDB, 10+ archived in Firestore)")
+        } catch {
+            print("❌ Error seeding test data: \(error.localizedDescription)")
         }
     }
 }
