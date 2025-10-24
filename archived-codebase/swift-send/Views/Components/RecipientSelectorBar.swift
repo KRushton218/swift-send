@@ -155,8 +155,6 @@ struct RecipientSelectorBar: View {
                                 onAddRecipient(user)
                             } label: {
                                 HStack(spacing: 12) {
-                                    ProfilePictureView(photoURL: user.photoURL, size: 40)
-
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(user.displayName)
                                             .font(.headline)
@@ -225,8 +223,6 @@ struct RecipientChip: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            ProfilePictureView(photoURL: recipient.photoURL, size: 24)
-
             Text(recipient.displayName)
                 .font(.subheadline)
                 .lineLimit(1)

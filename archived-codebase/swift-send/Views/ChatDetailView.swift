@@ -16,6 +16,8 @@ struct ChatDetailView: View {
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
     
+    @State private var showInfoSheet = false
+    
     private let logger = Logger(subsystem: "com.swiftsend.app", category: "ChatDetailView")
     
     init(conversation: Conversation, userId: String) {
@@ -33,12 +35,19 @@ struct ChatDetailView: View {
                     LazyVStack(spacing: 12) {
                         // Load more button at top
                         if !viewModel.messages.isEmpty {
-                            Button("Load Earlier Messages") {
-                                viewModel.loadOlderMessages()
+                            if viewModel.hasMoreMessages {
+                                Button("Load Earlier Messages") {
+                                    viewModel.loadOlderMessages()
+                                }
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.vertical, 8)
+                            } else {
+                                Text("No Earlier Messages Available")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .padding(.vertical, 8)
                             }
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.vertical, 8)
                         }
                         
                         ForEach(viewModel.messages) { message in
@@ -82,6 +91,29 @@ struct ChatDetailView: View {
         }
         .navigationTitle(getConversationDisplayName())
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if conversation.type == .group {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showInfoSheet = true
+                    } label: {
+                        Image(systemName: "info.circle")
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showInfoSheet) {
+            if let activeConversation = viewModel.conversation ?? Optional(conversation) {
+                GroupChatInfoView(
+                    conversation: activeConversation,
+                    currentUserId: currentUserId
+                ) {
+                    Task {
+                        viewModel.loadConversation()
+                    }
+                }
+            }
+        }
         .onAppear {
             logger.info("👁️ ChatDetailView appeared for conversation: \(self.conversation.id ?? "unknown")")
             viewModel.setup()
@@ -93,8 +125,10 @@ struct ChatDetailView: View {
     }
     
     private func getConversationDisplayName() -> String {
-        // Use the safe display name from the Conversation model
-        return conversation.safeDisplayName(currentUserId: currentUserId)
+        // Use the safe display name from the ViewModel's conversation (which can be updated)
+        // Fall back to the original conversation if viewModel.conversation is nil
+        let activeConversation = viewModel.conversation ?? conversation
+        return activeConversation.safeDisplayName(currentUserId: currentUserId)
     }
 }
 

@@ -2,83 +2,99 @@
 //  AuthManager.swift
 //  swift-send
 //
-//  Created by Kiran Rushton on 10/22/25.
-//
 
 import Foundation
 import Combine
 import FirebaseAuth
 
+@MainActor
 class AuthManager: ObservableObject {
     @Published var user: User?
-    @Published var isAuthenticated = false
-    @Published var needsProfileSetup = false
-    
+    @Published var isLoading = false
+    @Published var errorMessage: String?
+
     private var authStateHandler: AuthStateDidChangeListenerHandle?
-    private var profileManager = UserProfileManager()
-    
+    private let realtimeManager = RealtimeManager.shared
+
     init() {
-        // Listen for auth state changes
+        registerAuthStateHandler()
+    }
+
+    deinit {
+        if let handle = authStateHandler {
+            Auth.auth().removeStateDidChangeListener(handle)
+        }
+    }
+
+    private func registerAuthStateHandler() {
         authStateHandler = Auth.auth().addStateDidChangeListener { [weak self] _, user in
-            self?.user = user
-            self?.isAuthenticated = user != nil
-            
-            // Check if user needs to set up profile
-            if let user = user {
-                Task {
-                    await self?.checkProfileSetup(userId: user.uid)
+            Task { @MainActor in
+                self?.user = user
+
+                // Set up presence when user signs in
+                if let user = user {
+                    await self?.setupUserOnSignIn(userId: user.uid, email: user.email ?? "")
                 }
             }
         }
     }
-    
-    deinit {
-        if let handler = authStateHandler {
-            Auth.auth().removeStateDidChangeListener(handler)
-        }
-    }
-    
-    // Sign up with email
-    func signUp(email: String, password: String) async throws {
-        let result = try await Auth.auth().createUser(withEmail: email, password: password)
-        self.user = result.user
-        
-        // Create initial user profile
-        try await profileManager.createUserProfile(
-            userId: result.user.uid,
-            email: email
-        )
-        
-        // User needs to set display name
-        await MainActor.run {
-            self.needsProfileSetup = true
-        }
-    }
-    
-    // Sign in with email
-    func signIn(email: String, password: String) async throws {
-        let result = try await Auth.auth().signIn(withEmail: email, password: password)
-        self.user = result.user
-    }
-    
-    // Sign out
-    func signOut() throws {
-        try Auth.auth().signOut()
-        self.user = nil
-        self.needsProfileSetup = false
-    }
-    
-    // Check if profile setup is needed
-    private func checkProfileSetup(userId: String) async {
+
+    private func setupUserOnSignIn(userId: String, email: String) async {
         do {
-            let profile = try await profileManager.getUserProfile(userId: userId)
-            await MainActor.run {
-                // Check if user has completed profile setup
-                self.needsProfileSetup = profile?.hasCompletedProfileSetup == false
+            // Register user in RTDB if not exists
+            let existingUser = try await realtimeManager.getUser(userId: userId)
+            if existingUser == nil {
+                try await realtimeManager.registerUser(userId: userId, email: email, displayName: email)
             }
+
+            // Set presence
+            try await realtimeManager.setPresence(userId: userId, name: email)
+
+            // Request notification permissions
+            await NotificationManager.shared.requestPermission()
         } catch {
-            print("Error checking profile setup: \(error.localizedDescription)")
+            print("Error setting up user: \(error)")
+        }
+    }
+
+    func signIn(email: String, password: String) async {
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            try await Auth.auth().signIn(withEmail: email, password: password)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        isLoading = false
+    }
+
+    func signUp(email: String, password: String) async {
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            try await Auth.auth().createUser(withEmail: email, password: password)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        isLoading = false
+    }
+
+    func signOut() {
+        // Update last online before signing out
+        if let userId = user?.uid {
+            Task {
+                try? await realtimeManager.updateLastOnline(userId: userId)
+            }
+        }
+
+        do {
+            try Auth.auth().signOut()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
-

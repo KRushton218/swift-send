@@ -264,13 +264,24 @@ class FirestoreManager {
     
     /// Delete a message for a specific user (per-user soft delete)
     func deleteMessageForUser(conversationId: String, messageId: String, userId: String) async throws {
-        try await db.collection("conversations")
-            .document(conversationId)
-            .collection("messages")
-            .document(messageId)
-            .updateData([
-                "deletedFor": FieldValue.arrayUnion([userId])
-            ])
+        print("📝 [FirestoreManager] Updating message deletedFor array")
+        print("   Conversation: \(conversationId)")
+        print("   Message: \(messageId)")
+        print("   User: \(userId)")
+        
+        do {
+            try await db.collection("conversations")
+                .document(conversationId)
+                .collection("messages")
+                .document(messageId)
+                .updateData([
+                    "deletedFor": FieldValue.arrayUnion([userId])
+                ])
+            print("✅ [FirestoreManager] Firestore message updated successfully")
+        } catch {
+            print("❌ [FirestoreManager] Firestore update failed: \(error.localizedDescription)")
+            throw error
+        }
     }
     
     /// Edit a message

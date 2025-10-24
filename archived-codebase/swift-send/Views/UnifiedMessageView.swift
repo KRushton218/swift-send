@@ -52,16 +52,16 @@ struct UnifiedMessageView: View {
                     }
                 }
             }
-            .onChange(of: viewModel.searchText) { newValue in
+            .onChange(of: viewModel.searchText) { oldValue, newValue in
                 viewModel.searchUsers(query: newValue)
             }
-            .onChange(of: hasSelectedRecipients) { hasRecipients in
+            .onChange(of: hasSelectedRecipients) { oldValue, hasRecipients in
                 if !hasRecipients {
                     isRecipientFieldFocused = true
                     isMessageFieldFocused = false
                 }
             }
-            .onChange(of: viewModel.existingConversation != nil) { hasConversation in
+            .onChange(of: viewModel.existingConversation != nil) { oldValue, hasConversation in
                 if hasConversation {
                     isRecipientFieldFocused = false
                     isMessageFieldFocused = true
@@ -192,17 +192,14 @@ struct UnifiedMessageView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(viewModel.selectedRecipients) { recipient in
-                        HStack(spacing: 6) {
-                            ProfilePictureView(photoURL: recipient.photoURL, size: 24)
-                            Text(recipient.displayName)
-                                .font(.subheadline)
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.blue.opacity(0.1))
-                        .foregroundColor(.blue)
-                        .cornerRadius(16)
+                        Text(recipient.displayName)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.blue.opacity(0.1))
+                            .foregroundColor(.blue)
+                            .cornerRadius(16)
                     }
                 }
             }

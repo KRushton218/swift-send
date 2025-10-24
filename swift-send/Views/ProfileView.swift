@@ -2,106 +2,59 @@
 //  ProfileView.swift
 //  swift-send
 //
-//  Created by Kiran Rushton on 10/22/25.
-//
 
 import SwiftUI
 import FirebaseAuth
 
 struct ProfileView: View {
     @EnvironmentObject var authManager: AuthManager
-    @Environment(\.dismiss) private var dismiss
-    @State private var displayName = ""
-    @State private var photoURL = ""
-    @State private var isUpdating = false
-    @State private var errorMessage = ""
-    @State private var successMessage = ""
-    
-    private var profileManager = UserProfileManager()
-    
+    @Environment(\.dismiss) var dismiss
+
     var body: some View {
-        NavigationView {
-            Form {
-                Section {
+        NavigationStack {
+            VStack(spacing: 24) {
+                // Profile Image
+                Circle()
+                    .fill(Color.blue.gradient)
+                    .frame(width: 120, height: 120)
+                    .overlay {
+                        Text(initials)
+                            .font(.system(size: 48, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.top, 40)
+
+                // User Info
+                VStack(spacing: 8) {
+                    Text(displayName)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+
+                    Text(email)
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                }
+
+                Spacer()
+
+                // Sign Out Button
+                Button {
+                    authManager.signOut()
+                    dismiss()
+                } label: {
                     HStack {
-                        Spacer()
-                        ProfilePictureView(photoURL: photoURL.isEmpty ? nil : photoURL, size: 100)
-                        Spacer()
-                    }
-                    .listRowBackground(Color.clear)
-                }
-                
-                Section("Profile Information") {
-                    TextField("Display Name", text: $displayName)
-                        .textContentType(.name)
-                        .autocapitalization(.words)
-                    
-                    TextField("Photo URL (optional)", text: $photoURL)
-                        .textContentType(.URL)
-                        .autocapitalization(.none)
-                        .keyboardType(.URL)
-                    
-                    if let email = authManager.user?.email {
-                        HStack {
-                            Text("Email")
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text(email)
-                        }
-                    }
-                }
-                
-                if !errorMessage.isEmpty {
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(errorMessage)
-                                .foregroundColor(.red)
-                                .font(.caption)
-                            
-                            Button("Retry") {
-                                errorMessage = ""
-                                loadProfile()
-                            }
-                            .font(.caption)
-                        }
-                    }
-                }
-                
-                if !successMessage.isEmpty {
-                    Section {
-                        Text(successMessage)
-                            .foregroundColor(.green)
-                            .font(.caption)
-                    }
-                }
-                
-                Section {
-                    Button(action: saveProfile) {
-                        if isUpdating {
-                            HStack {
-                                Spacer()
-                                ProgressView()
-                                Spacer()
-                            }
-                        } else {
-                            Text("Save Changes")
-                        }
-                    }
-                    .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isUpdating)
-                }
-                
-                Section {
-                    Button(role: .destructive) {
-                        // Dismiss the sheet first to avoid view update issues
-                        dismiss()
-                        // Sign out after a brief delay to let the sheet dismiss animation complete
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            try? authManager.signOut()
-                        }
-                    } label: {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
                         Text("Sign Out")
                     }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.red)
+                    .cornerRadius(12)
                 }
+                .padding(.horizontal)
+                .padding(.bottom, 40)
             }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
@@ -112,81 +65,26 @@ struct ProfileView: View {
                     }
                 }
             }
-            .onAppear {
-                loadProfile()
-            }
         }
     }
-    
-    private func loadProfile() {
-        guard let userId = authManager.user?.uid else { return }
-        
-        // First, try to load from Firebase Auth
-        if let user = authManager.user {
-            displayName = user.displayName ?? ""
-            if let photoURLString = user.photoURL?.absoluteString {
-                photoURL = photoURLString
-            }
-        }
-        
-        // Then try to load from database (will update if available)
-        Task {
-            do {
-                if let profile = try await profileManager.getUserProfile(userId: userId) {
-                    await MainActor.run {
-                        displayName = profile.displayName
-                        photoURL = profile.photoURL ?? ""
-                        errorMessage = "" // Clear any previous errors
-                    }
-                }
-            } catch {
-                // Only show error if we couldn't load from Auth either
-                if displayName.isEmpty {
-                    await MainActor.run {
-                        errorMessage = "Unable to load profile. Please check your connection."
-                    }
-                }
-            }
-        }
+
+    private var email: String {
+        authManager.user?.email ?? "Unknown"
     }
-    
-    private func saveProfile() {
-        guard let userId = authManager.user?.uid else { return }
-        
-        isUpdating = true
-        errorMessage = ""
-        successMessage = ""
-        
-        Task {
-            do {
-                try await profileManager.updateDisplayName(
-                    userId: userId,
-                    displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
-                
-                if !photoURL.isEmpty {
-                    try await profileManager.updatePhotoURL(
-                        userId: userId,
-                        photoURL: photoURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                    )
-                }
-                
-                await MainActor.run {
-                    successMessage = "Profile updated successfully!"
-                    isUpdating = false
-                }
-                
-                // Dismiss after a short delay
-                try await Task.sleep(nanoseconds: 1_000_000_000)
-                await MainActor.run {
-                    dismiss()
-                }
-            } catch {
-                await MainActor.run {
-                    errorMessage = "Failed to update profile: \(error.localizedDescription)"
-                    isUpdating = false
-                }
-            }
+
+    private var displayName: String {
+        authManager.user?.email?.components(separatedBy: "@").first?.capitalized ?? "User"
+    }
+
+    private var initials: String {
+        let name = displayName
+        let components = name.components(separatedBy: " ")
+        if components.count > 1 {
+            let firstInitial = components[0].prefix(1)
+            let lastInitial = components[1].prefix(1)
+            return "\(firstInitial)\(lastInitial)".uppercased()
+        } else {
+            return String(name.prefix(2)).uppercased()
         }
     }
 }
@@ -195,4 +93,3 @@ struct ProfileView: View {
     ProfileView()
         .environmentObject(AuthManager())
 }
-

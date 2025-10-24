@@ -63,6 +63,64 @@ class MainViewModel: ObservableObject {
     
     // MARK: - Load Conversations (Firestore)
     
+    /// Check if conversations have meaningfully changed for inbox display
+    /// Compares: IDs, names, participants, and last message (for preview and sorting)
+    /// Excludes: read receipts, typing status, online presence (handled separately)
+    private func conversationsHaveChanged(old: [Conversation], new: [Conversation]) -> Bool {
+        // Different counts = changed
+        if old.count != new.count {
+            return true
+        }
+        
+        // Create lookup dictionaries by ID
+        let oldDict = Dictionary(uniqueKeysWithValues: old.compactMap { conv -> (String, Conversation)? in
+            guard let id = conv.id else { return nil }
+            return (id, conv)
+        })
+        
+        let newDict = Dictionary(uniqueKeysWithValues: new.compactMap { conv -> (String, Conversation)? in
+            guard let id = conv.id else { return nil }
+            return (id, conv)
+        })
+        
+        // Different IDs = changed
+        if Set(oldDict.keys) != Set(newDict.keys) {
+            return true
+        }
+        
+        // Check if any conversation's structural properties changed
+        for (id, newConv) in newDict {
+            guard let oldConv = oldDict[id] else {
+                logger.debug("   Conversation \(id) is new")
+                return true // New conversation appeared
+            }
+            
+            // Compare fields that affect inbox list display:
+            // - name: Group name changes
+            // - memberIds: Participants added/removed
+            // - lastMessage: New messages (for preview and sorting)
+            if oldConv.name != newConv.name {
+                logger.info("   📝 Name changed for \(id): '\(oldConv.name ?? "nil")' → '\(newConv.name ?? "nil")'")
+                return true
+            }
+            
+            if oldConv.memberIds != newConv.memberIds {
+                logger.info("   👥 Members changed for \(id): \(oldConv.memberIds.count) → \(newConv.memberIds.count)")
+                return true
+            }
+            
+            // Compare last message for preview and sorting updates
+            if oldConv.lastMessage?.text != newConv.lastMessage?.text ||
+               oldConv.lastMessage?.timestamp != newConv.lastMessage?.timestamp {
+                logger.info("   💬 Last message changed for \(id)")
+                return true
+            }
+        }
+        
+        logger.debug("   No structural changes detected")
+        return false
+    }
+    
     private func loadConversations(userId: String) {
         conversationListener = firestoreManager.observeUserConversations(memberIds: [userId]) { [weak self] conversations in
             guard let self = self else { return }
@@ -76,11 +134,8 @@ class MainViewModel: ObservableObject {
                     return !(status?.isHidden ?? false)
                 }
                 
-                // Only update if the conversations actually changed (compare IDs)
-                let oldIds = self.conversations.compactMap { $0.id }.sorted()
-                let newIds = filtered.compactMap { $0.id }.sorted()
-                
-                if oldIds != newIds {
+                // Check if conversations actually changed (IDs or content)
+                if self.conversationsHaveChanged(old: self.conversations, new: filtered) {
                     self.logger.info("   Conversations changed, updating array")
                     self.conversations = filtered
                 } else {
@@ -135,15 +190,26 @@ class MainViewModel: ObservableObject {
     private func filterConversations() {
         self.logger.info("🔍 Filtering conversations (current count: \(self.conversations.count))")
         let beforeCount = conversations.count
+        
         // Filter out hidden conversations based on current statuses
         conversations = conversations.filter { conversation in
             guard let conversationId = conversation.id else { return true }
             let status = userConversationStatuses[conversationId]
-            return !(status?.isHidden ?? false)
+            let isHidden = status?.isHidden ?? false
+            
+            if isHidden {
+                print("👻 [MainViewModel] Filtering out hidden conversation: \(conversationId)")
+            }
+            
+            return !isHidden
         }
+        
         let afterCount = conversations.count
         if beforeCount != afterCount {
-            self.logger.info("   Filtered out \(beforeCount - afterCount) hidden conversations")
+            self.logger.info("   ✅ Filtered out \(beforeCount - afterCount) hidden conversations")
+            print("📊 [MainViewModel] Conversation count: \(beforeCount) → \(afterCount)")
+        } else {
+            print("📊 [MainViewModel] No hidden conversations to filter")
         }
     }
     
@@ -199,6 +265,13 @@ class MainViewModel: ObservableObject {
         return conversation.safeDisplayName(currentUserId: currentUserId)
     }
     
+    /// Get display name with type prefix for conversation list
+    func getConversationDisplayNameWithType(_ conversation: Conversation, currentUserId: String) -> String {
+        let typePrefix = conversation.type == .group ? "Group" : "Direct"
+        let name = conversation.safeDisplayName(currentUserId: currentUserId)
+        return "\(typePrefix): \(name)"
+    }
+    
     /// Get photo URL for a conversation (uses safe accessor)
     func getConversationPhotoURL(_ conversation: Conversation, currentUserId: String) -> String? {
         return conversation.safePhotoURL(currentUserId: currentUserId)
@@ -216,6 +289,14 @@ class MainViewModel: ObservableObject {
     
     /// Get last message timestamp
     func getLastMessageTimestamp(_ conversation: Conversation) -> Date {
+        // Use RTDB data first (real-time, always current)
+        if let conversationId = conversation.id,
+           let status = userConversationStatuses[conversationId],
+           status.lastMessageTimestamp > 0 {
+            return Date(timeIntervalSince1970: status.lastMessageTimestamp / 1000)
+        }
+        
+        // Fallback to Firestore (for initial load before RTDB connects)
         return conversation.lastMessage?.timestamp ?? conversation.createdAt
     }
     
@@ -252,14 +333,22 @@ class MainViewModel: ObservableObject {
     // MARK: - Delete Operations
     
     func deleteConversation(_ conversation: Conversation) {
-        guard let conversationId = conversation.id else { return }
+        guard let conversationId = conversation.id else {
+            print("❌ [MainViewModel] Cannot delete conversation - no ID")
+            return
+        }
+        
+        print("👻 [MainViewModel] User requested conversation hide")
+        print("   Conversation ID: \(conversationId)")
+        print("   Conversation name: \(conversation.name ?? "Direct chat")")
         
         Task {
             do {
                 try await messagingManager.hideConversationForUser(conversationId: conversationId)
+                print("✅ [MainViewModel] Conversation hide completed")
                 // Conversation will be filtered out automatically on next update
             } catch {
-                print("Error hiding conversation: \(error.localizedDescription)")
+                print("❌ [MainViewModel] Error hiding conversation: \(error.localizedDescription)")
             }
         }
     }

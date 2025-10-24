@@ -1,0 +1,47 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -scheme swift-send -destination "platform=iOS Simulator,name=iPhone 15" clean build
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  SwiftProtobuf: https://github.com/apple/swift-protobuf.git @ 1.32.0
+  Firebase: https://github.com/firebase/firebase-ios-sdk @ 12.4.0
+  GoogleAdsOnDeviceConversion: https://github.com/googleads/google-ads-on-device-conversion-ios-sdk @ 3.1.0
+  InteropForGoogle: https://github.com/google/interop-ios-for-google-sdks.git @ 101.0.0
+  nanopb: https://github.com/firebase/nanopb.git @ 2.30910.0
+  leveldb: https://github.com/firebase/leveldb.git @ 1.22.5
+  GoogleDataTransport: https://github.com/google/GoogleDataTransport.git @ 10.1.0
+  GoogleAppMeasurement: https://github.com/google/GoogleAppMeasurement.git @ 12.4.0
+  GoogleUtilities: https://github.com/google/GoogleUtilities.git @ 8.1.0
+  GTMSessionFetcher: https://github.com/google/gtm-session-fetcher.git @ 5.0.0
+  abseil: https://github.com/google/abseil-cpp-binary.git @ 1.2024072200.0
+  AppCheck: https://github.com/google/app-check.git @ 11.2.0
+  Promises: https://github.com/google/promises.git @ 2.4.0
+  gRPC: https://github.com/google/grpc-binary.git @ 1.69.1
+
+2025-10-23 20:08:46.965 xcodebuild[14571:194861136] Writing error result bundle to /var/folders/w6/13dgwn_x66z_b52_6ztd1m7m0000gn/T/ResultBundle_2025-23-10_20-08-0046.xcresult
+xcodebuild: error: Unable to find a device matching the provided destination specifier:
+		{ platform:iOS Simulator, OS:latest, name:iPhone 15 }
+
+	The requested device could not be found because no available devices matched the request.
+
+	Available destinations for the "swift-send" scheme:
+		{ platform:iOS, arch:arm64, id:00008130-000404993641001C, name:kPhone }
+		{ platform:iOS, id:dvtdevice-DVTiPhonePlaceholder-iphoneos:placeholder, name:Any iOS Device }
+		{ platform:iOS Simulator, id:dvtdevice-DVTiOSDeviceSimulatorPlaceholder-iphonesimulator:placeholder, name:Any iOS Simulator Device }
+		{ platform:visionOS Simulator, arch:arm64, variant:Designed for [iPad,iPhone], id:0BD5403D-22AC-4215-BCA1-C0B80E27840A, OS:26.0, name:Apple Vision Pro }
+		{ platform:iOS Simulator, arch:arm64, id:5BB9C1DC-DF45-4F04-A1F6-4D1A4B5CA10D, OS:26.0.1, name:iPad (A16) }
+		{ platform:iOS Simulator, arch:arm64, id:12BE0EA6-32C4-4476-ADA2-D22F9B201865, OS:26.0.1, name:iPad Air 11-inch (M3) }
+		{ platform:iOS Simulator, arch:arm64, id:679325B6-7CA5-4AEC-85B9-EAADF5AAF7D3, OS:26.0.1, name:iPad Air 13-inch (M3) }
+		{ platform:iOS Simulator, arch:arm64, id:A1E7125B-E725-4FEC-8AAE-CE928F104C58, OS:26.0.1, name:iPad Pro 11-inch (M4) }
+		{ platform:iOS Simulator, arch:arm64, id:3FD5D4CE-8C6A-4932-B7DF-D1C0BE2564C2, OS:26.0.1, name:iPad Pro 13-inch (M4) }
+		{ platform:iOS Simulator, arch:arm64, id:C4F25979-345C-4AC2-908A-ADBD247A5885, OS:26.0.1, name:iPad mini (A17 Pro) }
+		{ platform:iOS Simulator, arch:arm64, id:4616C6D4-A7BE-4FA3-B1F5-CA14F1E704F8, OS:26.0.1, name:iPhone 16e }
+		{ platform:iOS Simulator, arch:arm64, id:F3541538-02BB-4BB5-A3D2-A0ED226CB795, OS:26.0.1, name:iPhone 17 }
+		{ platform:iOS Simulator, arch:arm64, id:36A5E8F6-3DCF-4319-8B85-B520B67274CF, OS:26.0.1, name:iPhone 17 Pro }
+		{ platform:iOS Simulator, arch:arm64, id:8E72CE57-F426-4C3E-A623-CAF4B2F291F2, OS:26.0.1, name:iPhone 17 Pro Max }
+		{ platform:iOS Simulator, arch:arm64, id:8BEF2BFE-7F83-4211-BBFA-04A13EF9675B, OS:26.0.1, name:iPhone Air }
+
+	Ineligible destinations for the "swift-send" scheme:
+		{ platform:macOS, arch:undefined_arch, variant:Designed for [iPad,iPhone], id:00006034-001A51A41A68001C, name:My Mac, error:Xcode doesn’t support My Mac’s macOS 15.6.1 (24G90).  }

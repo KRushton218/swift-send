@@ -53,7 +53,7 @@ class UnifiedMessageViewModel: ObservableObject {
     private let firestoreManager = FirestoreManager()
     private let presenceManager = PresenceManager()
     
-    private var messageObserverHandle: DatabaseHandle?
+    private var messageObserverHandles: [DatabaseHandle] = []
     private var typingObserverHandle: DatabaseHandle?
     private var conversationListener: ListenerRegistration?
     private var presenceObservers: [String: DatabaseHandle] = [:]
@@ -205,7 +205,7 @@ class UnifiedMessageViewModel: ObservableObject {
         
         // Observe messages in real-time
         logger.debug("👀 Setting up message observer for conversation: \(conversationId)")
-        messageObserverHandle = messagingManager.observeActiveMessages(
+        messageObserverHandles = messagingManager.observeActiveMessages(
             conversationId: conversationId,
             limit: 50
         ) { [weak self] messages in
@@ -397,12 +397,13 @@ class UnifiedMessageViewModel: ObservableObject {
     func cleanup() {
         logger.info("🧹 Cleaning up observers and listeners")
         
-        // Remove message observer
-        if let handle = messageObserverHandle,
+        
+        // Remove message observers
+        if !self.messageObserverHandles.isEmpty,
            let conversationId = existingConversation?.id {
-            logger.debug("🔇 Removing message observer for conversation: \(conversationId)")
-            messagingManager.removeMessageObserver(conversationId: conversationId, handle: handle)
-            messageObserverHandle = nil
+            logger.debug("🔇 Removing \(self.messageObserverHandles.count) message observers for conversation: \(conversationId)")
+            messagingManager.removeMessageObserver(conversationId: conversationId, handles: self.messageObserverHandles)
+            self.messageObserverHandles.removeAll()
         }
         
         // Remove typing observer

@@ -34,8 +34,6 @@ struct TypingIndicatorView: View {
     
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            ProfilePictureView(size: 32)
-            
             HStack(spacing: 4) {
                 Text(typingText)
                     .font(.caption)

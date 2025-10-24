@@ -63,31 +63,19 @@ struct ConversationPreviewArea: View {
         VStack(spacing: 20) {
             Spacer()
             
-            // Show recipient avatars
+            // Show recipient names
             if !selectedRecipients.isEmpty {
-                HStack(spacing: -10) {
+                VStack(spacing: 8) {
                     ForEach(selectedRecipients.prefix(3)) { recipient in
-                        ProfilePictureView(photoURL: recipient.photoURL, size: 60)
-                            .overlay(
-                                Circle()
-                                    .stroke(Color(.systemBackground), lineWidth: 2)
-                            )
+                        Text(recipient.displayName)
+                            .font(.headline)
+                            .foregroundColor(.primary)
                     }
                     
                     if selectedRecipients.count > 3 {
-                        ZStack {
-                            Circle()
-                                .fill(Color.blue.opacity(0.2))
-                                .frame(width: 60, height: 60)
-                            
-                            Text("+\(selectedRecipients.count - 3)")
-                                .font(.headline)
-                                .foregroundColor(.blue)
-                        }
-                        .overlay(
-                            Circle()
-                                .stroke(Color(.systemBackground), lineWidth: 2)
-                        )
+                        Text("+\(selectedRecipients.count - 3) more")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                     }
                 }
                 .padding(.bottom, 8)

@@ -244,48 +244,121 @@ class MessagingManager {
     // MARK: - Observe Messages (RTDB Real-time)
     
     /// Observe active messages in RTDB (last 50 messages)
+    /// Uses optimized subscription pattern: initial fetch + subscribe to new messages only
     func observeActiveMessages(
         conversationId: String,
         limit: Int = 50,
         completion: @escaping ([Message]) -> Void
-    ) -> DatabaseHandle {
+    ) -> [DatabaseHandle] {
         guard let currentUserId = Auth.auth().currentUser?.uid else {
             completion([])
-            return 0
+            return []
         }
         
-        return rtdb.child("conversations")
+        var messages: [String: Message] = [:]
+        var handles: [DatabaseHandle] = []
+        var isInitialLoad = true
+        var initialLoadTimestamp: TimeInterval = 0
+        
+        let query = rtdb.child("conversations")
             .child(conversationId)
             .child("activeMessages")
             .queryLimited(toLast: UInt(limit))
-            .observe(.value) { snapshot in
-                var messages: [Message] = []
-                
-                for child in snapshot.children {
-                    if let snapshot = child as? DataSnapshot,
-                       let messageDict = snapshot.value as? [String: Any],
-                       var message = Message(rtdbData: messageDict) {
-                        message.conversationId = conversationId
-                        
-                        // Filter out messages deleted by current user
-                        if message.isDeletedForUser(currentUserId) {
-                            continue
-                        }
-                        
-                        messages.append(message)
-                    }
-                }
-                
-                completion(messages.sorted { $0.timestamp < $1.timestamp })
+        
+        // PHASE 1: Initial load - fetch existing messages once
+        // This fires for each existing message, but only during initial connection
+        let addedHandle = query.observe(.childAdded) { snapshot in
+            guard let messageDict = snapshot.value as? [String: Any],
+                  var message = Message(rtdbData: messageDict) else { return }
+            
+            message.conversationId = conversationId
+            
+            // Filter out deleted messages
+            if message.isDeletedForUser(currentUserId) {
+                print("🚫 [OBSERVE] Filtering deleted message: \(snapshot.key)")
+                print("   deletedFor: \(message.deletedFor ?? [])")
+                return
             }
+            
+            messages[snapshot.key] = message
+            
+            // Track the latest timestamp during initial load
+            if isInitialLoad {
+                initialLoadTimestamp = max(initialLoadTimestamp, message.timestamp.timeIntervalSince1970)
+            }
+            
+            // Only emit updates after initial load completes
+            if !isInitialLoad {
+                print("📨 [OBSERVE] New message added: \(snapshot.key)")
+                completion(Array(messages.values).sorted { $0.timestamp < $1.timestamp })
+            }
+        }
+        handles.append(addedHandle)
+        
+        // Complete initial load after a brief delay (allow all childAdded events to fire)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if isInitialLoad {
+                isInitialLoad = false
+                print("📥 Initial message load complete: \(messages.count) messages")
+                completion(Array(messages.values).sorted { $0.timestamp < $1.timestamp })
+            }
+        }
+        
+        // PHASE 2: Subscribe to changes for existing messages
+        // Only listen for meaningful changes (deletions, edits)
+        let changedHandle = query.observe(.childChanged) { snapshot in
+            guard !isInitialLoad else { return } // Skip during initial load
+            
+            guard let messageDict = snapshot.value as? [String: Any],
+                  var message = Message(rtdbData: messageDict) else { return }
+            
+            message.conversationId = conversationId
+            
+            // Check if message was deleted for this user
+            if message.isDeletedForUser(currentUserId) {
+                print("🗑️ [OBSERVE] Message deleted, removing from local cache: \(snapshot.key)")
+                print("   deletedFor: \(message.deletedFor ?? [])")
+                messages.removeValue(forKey: snapshot.key)
+            } else {
+                // Only update if the message content actually changed
+                let existingMessage = messages[snapshot.key]
+                if existingMessage?.text != message.text || 
+                   existingMessage?.mediaUrl != message.mediaUrl {
+                    print("✏️ [OBSERVE] Message content changed: \(snapshot.key)")
+                    messages[snapshot.key] = message
+                } else {
+                    // Skip updates for delivery/read status changes to reduce noise
+                    return
+                }
+            }
+            
+            print("📤 [OBSERVE] Emitting updated message list (\(messages.count) messages)")
+            completion(Array(messages.values).sorted { $0.timestamp < $1.timestamp })
+        }
+        handles.append(changedHandle)
+        
+        // PHASE 3: Handle message removals
+        let removedHandle = query.observe(.childRemoved) { snapshot in
+            guard !isInitialLoad else { return }
+            print("🔥 [OBSERVE] Message removed from RTDB: \(snapshot.key)")
+            messages.removeValue(forKey: snapshot.key)
+            print("📤 [OBSERVE] Emitting updated message list (\(messages.count) messages)")
+            completion(Array(messages.values).sorted { $0.timestamp < $1.timestamp })
+        }
+        handles.append(removedHandle)
+        
+        return handles
     }
     
     /// Remove message observer
-    func removeMessageObserver(conversationId: String, handle: DatabaseHandle) {
-        rtdb.child("conversations")
+    func removeMessageObserver(conversationId: String, handles: [DatabaseHandle]) {
+        let ref = rtdb.child("conversations")
             .child(conversationId)
             .child("activeMessages")
-            .removeObserver(withHandle: handle)
+        
+        for handle in handles {
+            ref.removeObserver(withHandle: handle)
+        }
     }
     
     // MARK: - Load Older Messages (Firestore History)
@@ -300,14 +373,29 @@ class MessagingManager {
             throw NSError(domain: "MessagingManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
         }
         
+        print("📚 [LOAD] Loading older messages from Firestore")
+        print("   Conversation: \(conversationId)")
+        print("   Before: \(beforeTimestamp)")
+        print("   Limit: \(limit)")
+        
         let messages = try await firestoreManager.getArchivedMessages(
             conversationId: conversationId,
             limit: limit,
             beforeTimestamp: beforeTimestamp
         )
         
+        print("   Retrieved: \(messages.count) messages")
+        
         // Filter out messages deleted by current user
-        return messages.filter { !$0.isDeletedForUser(currentUserId) }
+        let filtered = messages.filter { !$0.isDeletedForUser(currentUserId) }
+        let filteredCount = messages.count - filtered.count
+        
+        if filteredCount > 0 {
+            print("🚫 [LOAD] Filtered out \(filteredCount) deleted messages")
+        }
+        print("✅ [LOAD] Returning \(filtered.count) messages")
+        
+        return filtered
     }
     
     // MARK: - Delivery & Read Status
@@ -328,29 +416,55 @@ class MessagingManager {
             ])
     }
     
-    /// Mark message as read
-    func markAsRead(conversationId: String, messageId: String) async throws {
+    /// Mark a batch of messages as read for the current user
+    /// Optimized to reduce database writes - only updates conversation status
+    func markMessagesAsRead(
+        conversationId: String,
+        messageIds: [String],
+        lastReadMessageId: String? = nil
+    ) async throws {
         guard let userId = Auth.auth().currentUser?.uid else { return }
+        guard !messageIds.isEmpty else { return }
         
-        // Update RTDB
-        try await rtdb.child("conversations")
-            .child(conversationId)
-            .child("activeMessages")
-            .child(messageId)
-            .child("readBy")
-            .updateChildValues([
-                userId: ServerValue.timestamp()
-            ])
+        // OPTIMIZATION: Instead of updating each message individually,
+        // we only update the conversation status with the last read message ID.
+        // Individual message read receipts can be inferred from lastReadMessageId + timestamp.
+        // This reduces N database writes to just 1 write.
         
-        // Update user's conversation status
+        var statusUpdates: [String: Any] = [
+            "lastReadTimestamp": ServerValue.timestamp(),
+            "unreadCount": 0
+        ]
+        
+        if let lastReadMessageId = lastReadMessageId ?? messageIds.last {
+            statusUpdates["lastReadMessageId"] = lastReadMessageId
+        }
+        
         try await rtdb.child("userConversations")
             .child(userId)
             .child(conversationId)
-            .updateChildValues([
-                "lastReadMessageId": messageId,
-                "lastReadTimestamp": ServerValue.timestamp(),
-                "unreadCount": 0
-            ])
+            .updateChildValues(statusUpdates)
+        
+        // Optional: Only update read receipt on the LAST message for UI display
+        // This gives visual feedback without updating every single message
+        if let lastMessageId = lastReadMessageId ?? messageIds.last {
+            try? await rtdb.child("conversations")
+                .child(conversationId)
+                .child("activeMessages")
+                .child(lastMessageId)
+                .child("readBy")
+                .child(userId)
+                .setValue(ServerValue.timestamp())
+        }
+    }
+    
+    /// Mark message as read
+    func markAsRead(conversationId: String, messageId: String) async throws {
+        try await markMessagesAsRead(
+            conversationId: conversationId,
+            messageIds: [messageId],
+            lastReadMessageId: messageId
+        )
     }
     
     /// Mark all messages in conversation as read
@@ -400,33 +514,93 @@ class MessagingManager {
     /// Delete a message for the current user (per-user soft delete)
     func deleteMessageForUser(conversationId: String, messageId: String) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
+            print("❌ [DELETE] Not authenticated")
             throw NSError(domain: "MessagingManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
         }
         
-        // Update Firestore - add user to deletedFor array (permanent record)
-        try await firestoreManager.deleteMessageForUser(
-            conversationId: conversationId,
-            messageId: messageId,
-            userId: userId
-        )
+        print("🗑️ [DELETE] Starting message deletion")
+        print("   User: \(userId)")
+        print("   Conversation: \(conversationId)")
+        print("   Message: \(messageId)")
         
-        // Note: RTDB doesn't need updating - messages are filtered on read
-        // and will naturally age out of the 50-message window
+        // 1. Update Firestore - add user to deletedFor array (permanent record)
+        print("📝 [DELETE] Updating Firestore...")
+        do {
+            try await firestoreManager.deleteMessageForUser(
+                conversationId: conversationId,
+                messageId: messageId,
+                userId: userId
+            )
+            print("✅ [DELETE] Firestore updated successfully")
+        } catch {
+            print("❌ [DELETE] Firestore update failed: \(error.localizedDescription)")
+            throw error
+        }
+        
+        // 2. Update RTDB - add user to deletedFor array (for real-time filtering)
+        print("📝 [DELETE] Updating RTDB...")
+        
+        // Get current deletedFor array
+        let snapshot = try await rtdb.child("conversations")
+            .child(conversationId)
+            .child("activeMessages")
+            .child(messageId)
+            .child("deletedFor")
+            .getData()
+        
+        var deletedFor = snapshot.value as? [String] ?? []
+        print("   Current deletedFor: \(deletedFor)")
+        
+        if !deletedFor.contains(userId) {
+            deletedFor.append(userId)
+            print("   New deletedFor: \(deletedFor)")
+            
+            // Update RTDB with new deletedFor array
+            do {
+                try await rtdb.child("conversations")
+                    .child(conversationId)
+                    .child("activeMessages")
+                    .child(messageId)
+                    .updateChildValues([
+                        "deletedFor": deletedFor
+                    ])
+                print("✅ [DELETE] RTDB updated successfully")
+                print("🎉 [DELETE] Message deletion complete!")
+            } catch {
+                print("❌ [DELETE] RTDB update failed: \(error.localizedDescription)")
+                throw error
+            }
+        } else {
+            print("ℹ️ [DELETE] User already in deletedFor array, skipping RTDB update")
+            print("🎉 [DELETE] Message deletion complete!")
+        }
     }
     
     /// Hide conversation for the current user
     func hideConversationForUser(conversationId: String) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
+            print("❌ [HIDE] Not authenticated")
             throw NSError(domain: "MessagingManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
         }
         
+        print("👻 [HIDE] Starting conversation hide")
+        print("   User: \(userId)")
+        print("   Conversation: \(conversationId)")
+        
         // Set hidden flag in RTDB
-        try await rtdb.child("userConversations")
-            .child(userId)
-            .child(conversationId)
-            .updateChildValues([
-                "isHidden": true
-            ])
+        do {
+            try await rtdb.child("userConversations")
+                .child(userId)
+                .child(conversationId)
+                .updateChildValues([
+                    "isHidden": true
+                ])
+            print("✅ [HIDE] Conversation hidden successfully")
+            print("🎉 [HIDE] Conversation hide complete!")
+        } catch {
+            print("❌ [HIDE] Failed to hide conversation: \(error.localizedDescription)")
+            throw error
+        }
     }
     
     // MARK: - Legacy Delete Operations (kept for backward compatibility)
