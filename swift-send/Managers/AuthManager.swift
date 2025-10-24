@@ -15,6 +15,7 @@ class AuthManager: ObservableObject {
 
     private var authStateHandler: AuthStateDidChangeListenerHandle?
     private let realtimeManager = RealtimeManager.shared
+    private var presenceHeartbeatTimer: Timer?
 
     init() {
         registerAuthStateHandler()
@@ -24,6 +25,7 @@ class AuthManager: ObservableObject {
         if let handle = authStateHandler {
             Auth.auth().removeStateDidChangeListener(handle)
         }
+        stopPresenceHeartbeat()
     }
 
     private func registerAuthStateHandler() {
@@ -49,6 +51,9 @@ class AuthManager: ObservableObject {
 
             // Set presence
             try await realtimeManager.setPresence(userId: userId, name: email)
+
+            // Start presence heartbeat to update every 1 second
+            startPresenceHeartbeat()
 
             // Request notification permissions
             await NotificationManager.shared.requestPermission()
@@ -84,6 +89,9 @@ class AuthManager: ObservableObject {
     }
 
     func signOut() {
+        // Stop presence heartbeat
+        stopPresenceHeartbeat()
+
         // Update last online before signing out
         if let userId = user?.uid {
             Task {
@@ -96,5 +104,30 @@ class AuthManager: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Presence Heartbeat
+
+    private func startPresenceHeartbeat() {
+        // Stop any existing timer
+        stopPresenceHeartbeat()
+
+        // Create timer that fires every 1 second
+        presenceHeartbeatTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self, let userId = self.user?.uid else { return }
+
+            Task { @MainActor in
+                do {
+                    try await self.realtimeManager.updateLastOnline(userId: userId)
+                } catch {
+                    print("Error updating presence heartbeat: \(error)")
+                }
+            }
+        }
+    }
+
+    private func stopPresenceHeartbeat() {
+        presenceHeartbeatTimer?.invalidate()
+        presenceHeartbeatTimer = nil
     }
 }
