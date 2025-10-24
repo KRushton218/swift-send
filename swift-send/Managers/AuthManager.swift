@@ -6,6 +6,7 @@
 import Foundation
 import Combine
 import FirebaseAuth
+import UIKit
 
 @MainActor
 class AuthManager: ObservableObject {
@@ -16,9 +17,11 @@ class AuthManager: ObservableObject {
     private var authStateHandler: AuthStateDidChangeListenerHandle?
     private let realtimeManager = RealtimeManager.shared
     private var presenceHeartbeatTimer: Timer?
+    private var lifecycleObservers: [NSObjectProtocol] = []
 
     init() {
         registerAuthStateHandler()
+        setupLifecycleObservers()
     }
 
     deinit {
@@ -26,6 +29,9 @@ class AuthManager: ObservableObject {
             Auth.auth().removeStateDidChangeListener(handle)
         }
         stopPresenceHeartbeat()
+
+        // Remove lifecycle observers
+        lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     private func registerAuthStateHandler() {
@@ -38,6 +44,53 @@ class AuthManager: ObservableObject {
                     await self?.setupUserOnSignIn(userId: user.uid, email: user.email ?? "")
                 }
             }
+        }
+    }
+
+    private func setupLifecycleObservers() {
+        // Observe when app enters background
+        let backgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.handleAppDidEnterBackground()
+            }
+        }
+        lifecycleObservers.append(backgroundObserver)
+
+        // Observe when app enters foreground
+        let foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.handleAppWillEnterForeground()
+            }
+        }
+        lifecycleObservers.append(foregroundObserver)
+    }
+
+    private func handleAppDidEnterBackground() async {
+        // Stop heartbeat to save battery
+        stopPresenceHeartbeat()
+
+        // Update lastOnline one final time before going inactive
+        if let userId = user?.uid {
+            do {
+                try await realtimeManager.updateLastOnline(userId: userId)
+            } catch {
+                print("Error updating presence on background: \(error)")
+            }
+        }
+    }
+
+    private func handleAppWillEnterForeground() async {
+        // Resume heartbeat if user is signed in
+        if user != nil {
+            startPresenceHeartbeat()
         }
     }
 
