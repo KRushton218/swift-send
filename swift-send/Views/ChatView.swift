@@ -6,6 +6,7 @@
 import SwiftUI
 
 struct ChatView: View {
+    @EnvironmentObject var authManager: AuthManager
     @StateObject var viewModel: ChatViewModel
     @State private var scrollProxy: ScrollViewProxy?
     @State private var userNames: [String: String] = [:]
@@ -75,13 +76,11 @@ struct ChatView: View {
         }
         .onAppear {
             viewModel.isActive = true
-            let participantNames = userNames.values.joined(separator: ", ")
-            print("✅ ChatView appeared - notifications disabled for \(participantNames)")
+            authManager.activeConversationId = viewModel.conversationId
         }
         .onDisappear {
             viewModel.isActive = false
-            let participantNames = userNames.values.joined(separator: ", ")
-            print("❌ ChatView disappeared - notifications enabled for \(participantNames)")
+            authManager.activeConversationId = nil
         }
     }
 

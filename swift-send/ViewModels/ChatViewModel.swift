@@ -53,14 +53,7 @@ class ChatViewModel: ObservableObject {
         messagesObserverHandle = realtimeManager.observeMessages(for: conversationId) { [weak self] messages in
             guard let self = self else { return }
             Task { @MainActor in
-                let previousCount = self.messages.count
                 self.messages = messages
-
-                // Send notification for new messages from others
-                if messages.count > previousCount {
-                    let newMessages = Array(messages.suffix(messages.count - previousCount))
-                    await self.handleNewMessages(newMessages)
-                }
 
                 // Mark new messages as read when they arrive
                 await self.markNewMessagesAsRead()
@@ -68,34 +61,9 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    private func handleNewMessages(_ newMessages: [Message]) async {
-        // Don't send notifications if user is actively viewing this chat
-        guard !isActive else {
-            let participantNames = participantInfo.map { $0.name }.joined(separator: ", ")
-            print("🔕 Suppressing notifications - user is viewing chat with \(participantNames)")
-            return
-        }
-
-        for message in newMessages {
-            // Only send notification for messages from others
-            guard message.senderId != currentUserId else { continue }
-
-            // Get sender name
-            guard let user = try? await realtimeManager.getUser(userId: message.senderId) else {
-                continue
-            }
-
-            let senderName = user.displayName ?? user.email
-            let isGroupChat = participants.count > 2
-
-            await NotificationManager.shared.sendMessageNotification(
-                from: senderName,
-                message: message.text,
-                conversationId: conversationId,
-                isGroupChat: isGroupChat
-            )
-        }
-    }
+    // NOTE: Notification handling is now done globally by AuthManager
+    // This eliminates duplicate notifications and ensures notifications
+    // work for all conversations, even those not currently open
 
     private func markNewMessagesAsRead() async {
         for message in messages where !message.isReadBy(userId: currentUserId) && message.senderId != currentUserId {
@@ -106,7 +74,7 @@ class ChatViewModel: ObservableObject {
                     userId: currentUserId
                 )
             } catch {
-                print("Error marking message as read: \(error)")
+                // Silently fail - non-critical operation
             }
         }
     }
@@ -124,7 +92,7 @@ class ChatViewModel: ObservableObject {
                     senderId: senderId
                 )
             } catch {
-                print("Error marking messages as read: \(error)")
+                // Silently fail - non-critical operation
             }
         }
     }
@@ -144,7 +112,6 @@ class ChatViewModel: ObservableObject {
                     text: text
                 )
             } catch {
-                print("Error sending message: \(error)")
                 // Restore message text on error
                 await MainActor.run {
                     messageText = text
@@ -163,7 +130,7 @@ class ChatViewModel: ObservableObject {
                     names[userId] = user.displayName ?? user.email
                 }
             } catch {
-                print("Error getting user: \(error)")
+                // Silently fail - user name will show as Unknown
             }
         }
 

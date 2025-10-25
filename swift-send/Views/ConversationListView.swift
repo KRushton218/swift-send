@@ -17,8 +17,11 @@ struct ConversationListView: View {
     @State private var userNames: [String: String] = [:] // userId -> displayName
     @State private var unreadCounts: [String: Int] = [:] // conversationId -> unread count
 
+    // Observer handles for proper cleanup
+    @State private var conversationObserverHandle: DatabaseHandle?
+    @State private var messageObserverHandles: [String: DatabaseHandle] = [:] // conversationId -> handle
+
     private let realtimeManager = RealtimeManager.shared
-    private var conversationObserverHandle: DatabaseHandle?
 
     var body: some View {
         Group {
@@ -69,7 +72,8 @@ struct ConversationListView: View {
     private func loadConversations() {
         guard let userId = authManager.user?.uid else { return }
 
-        _ = realtimeManager.observeConversations(for: userId) { [self] conversations in
+        // Store the conversation observer handle for cleanup
+        conversationObserverHandle = realtimeManager.observeConversations(for: userId) { [self] conversations in
             Task { @MainActor in
                 let previousConversations = self.conversations
                 self.conversations = conversations
@@ -102,7 +106,7 @@ struct ConversationListView: View {
                     names[userId] = user.displayName ?? user.email
                 }
             } catch {
-                print("Error loading user: \(error)")
+                // Silently fail - user name will show as Unknown
             }
         }
 
@@ -122,7 +126,7 @@ struct ConversationListView: View {
                 )
                 counts[conversation.id] = count
             } catch {
-                print("Error loading unread count for \(conversation.id): \(error)")
+                // Silently fail - default to 0 unread
                 counts[conversation.id] = 0
             }
         }
@@ -134,9 +138,13 @@ struct ConversationListView: View {
         guard let currentUserId = authManager.user?.uid else { return }
 
         for conversation in conversations {
-            // Observe messages in this conversation
-            _ = realtimeManager.observeMessages(for: conversation.id) { messages in
+            // Skip if already observing this conversation
+            if messageObserverHandles[conversation.id] != nil {
+                continue
+            }
 
+            // Observe messages in this conversation and STORE the handle
+            let handle = realtimeManager.observeMessages(for: conversation.id) { messages in
                 Task { @MainActor in
                     // Count unread messages: from others, not read by current user
                     let unreadCount = messages.filter { message in
@@ -147,6 +155,9 @@ struct ConversationListView: View {
                     self.unreadCounts[conversation.id] = max(0, unreadCount)
                 }
             }
+
+            // Store the handle for proper cleanup
+            messageObserverHandles[conversation.id] = handle
         }
     }
 
@@ -160,7 +171,22 @@ struct ConversationListView: View {
     }
 
     private func removeObserver() {
-        // Observer cleanup handled by RealtimeManager
+        print("🧹 ConversationListView: Cleaning up observers")
+
+        // Remove conversation observer
+        if let handle = conversationObserverHandle {
+            // Note: conversations is at root level, not under a specific path
+            realtimeManager.removeObserver(handle: handle, path: "conversations")
+            conversationObserverHandle = nil
+        }
+
+        // Remove all message observers
+        for (conversationId, handle) in messageObserverHandles {
+            realtimeManager.removeObserver(handle: handle, path: "conversations/\(conversationId)/messages")
+        }
+        messageObserverHandles.removeAll()
+
+        print("🧹 ConversationListView: Cleanup complete")
     }
 }
 
