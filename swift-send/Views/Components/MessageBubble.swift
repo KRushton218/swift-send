@@ -9,6 +9,10 @@ struct MessageBubble: View {
     let message: Message
     let isFromCurrentUser: Bool
     let userNames: [String: String] // userId -> displayName
+    let preferredLanguage: String // User's preferred language for translation
+
+    @StateObject private var translationManager = TranslationManager.shared
+    @State private var showTranslateButton = true
 
     var body: some View {
         HStack {
@@ -17,11 +21,123 @@ struct MessageBubble: View {
             }
 
             VStack(alignment: isFromCurrentUser ? .trailing : .leading, spacing: 4) {
-                Text(message.text)
-                    .padding(12)
-                    .background(isFromCurrentUser ? Color.blue : Color(.systemGray5))
-                    .foregroundColor(isFromCurrentUser ? .white : .primary)
-                    .cornerRadius(16)
+                // Main message bubble
+                VStack(alignment: .leading, spacing: 8) {
+                    // Original text
+                    Text(message.text)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // Translated text (if available from in-memory cache)
+                    if let translation = translationManager.translations[message.id] {
+                        Divider()
+                            .background(Color.white.opacity(0.3))
+
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "globe")
+                                .font(.caption2)
+                                .foregroundColor(isFromCurrentUser ? .white.opacity(0.8) : .secondary)
+
+                            Text(translation.translatedText)
+                                .font(.body)
+                                .italic()
+                                .foregroundColor(isFromCurrentUser ? .white.opacity(0.9) : .secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                    }
+                    // Fallback to message.translatedText for messages translated before app restart
+                    else if message.hasTranslation, let translatedText = message.translatedText {
+                        Divider()
+                            .background(Color.white.opacity(0.3))
+
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "globe")
+                                .font(.caption2)
+                                .foregroundColor(isFromCurrentUser ? .white.opacity(0.8) : .secondary)
+
+                            Text(translatedText)
+                                .font(.body)
+                                .italic()
+                                .foregroundColor(isFromCurrentUser ? .white.opacity(0.9) : .secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                    }
+
+                    // Translation loading indicator
+                    if translationManager.isTranslating[message.id] == true {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                            Text("Translating...")
+                                .font(.caption)
+                                .foregroundColor(isFromCurrentUser ? .white.opacity(0.8) : .secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                    }
+                }
+                .background(isFromCurrentUser ? Color.blue : Color(.systemGray5))
+                .foregroundColor(isFromCurrentUser ? .white : .primary)
+                .cornerRadius(16)
+
+                // Language badge and translate button
+                if !isFromCurrentUser {
+                    HStack(spacing: 8) {
+                        // Language badge (if detected) - prefer in-memory translation data
+                        if let translation = translationManager.translations[message.id] {
+                            Text(translationManager.getLanguageName(code: translation.detectedLanguage))
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color(.systemGray6))
+                                .foregroundColor(.secondary)
+                                .cornerRadius(4)
+                        } else if let detectedLang = message.detectedLanguage {
+                            Text(translationManager.getLanguageName(code: detectedLang))
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color(.systemGray6))
+                                .foregroundColor(.secondary)
+                                .cornerRadius(4)
+                        }
+
+                        // Translate button - show if no translation in memory or RTDB
+                        if showTranslateButton && translationManager.translations[message.id] == nil && !message.hasTranslation {
+                            Button(action: { translateMessage() }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "globe")
+                                    Text("Translate")
+                                }
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                            }
+                            .disabled(translationManager.isTranslating[message.id] == true)
+                        }
+
+                        // Clear translation button - show if translation exists in memory or RTDB
+                        if translationManager.translations[message.id] != nil || message.hasTranslation {
+                            Button(action: { clearTranslation() }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "xmark.circle")
+                                    Text("Show original")
+                                }
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                // Translation error
+                if let error = translationManager.translationErrors[message.id] {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 4)
+                }
 
                 VStack(alignment: isFromCurrentUser ? .trailing : .leading, spacing: 2) {
                     HStack(spacing: 4) {
@@ -48,6 +164,34 @@ struct MessageBubble: View {
             }
         }
         .padding(.horizontal)
+    }
+
+    // MARK: - Actions
+
+    private func translateMessage() {
+        Task {
+            do {
+                try await translationManager.translateMessage(
+                    message,
+                    to: preferredLanguage
+                )
+            } catch {
+                print("Translation error: \(error)")
+            }
+        }
+    }
+
+    private func clearTranslation() {
+        Task {
+            do {
+                try await translationManager.clearTranslation(
+                    conversationId: message.conversationId,
+                    messageId: message.id
+                )
+            } catch {
+                print("Clear translation error: \(error)")
+            }
+        }
     }
 
     private var statusIcon: some View {
