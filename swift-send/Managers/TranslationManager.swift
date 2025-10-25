@@ -151,26 +151,6 @@ class TranslationManager: ObservableObject {
         supportedLanguages[code] ?? code.uppercased()
     }
 
-    /// Detect if translation is needed based on user preferences
-    func shouldAutoTranslate(
-        message: Message,
-        currentUserId: String,
-        preferences: UserPreferences
-    ) -> Bool {
-        // Don't translate own messages
-        if message.senderId == currentUserId {
-            return false
-        }
-
-        // Don't translate if already translated
-        if message.hasTranslation {
-            return false
-        }
-
-        // Check if auto-translate is enabled
-        return preferences.autoTranslate
-    }
-
     /// Generate embeddings for messages in batch
     func generateEmbeddingsForMessages(
         _ messages: [Message]
