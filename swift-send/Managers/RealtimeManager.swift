@@ -11,7 +11,18 @@ class RealtimeManager {
     static let shared = RealtimeManager()
     nonisolated private let db = Database.database().reference()
 
-    private init() {}
+    // Server time offset to handle clock skew (in milliseconds)
+    private(set) var serverTimeOffset: TimeInterval = 0
+
+    private init() {
+        // Sync server time offset on initialization
+        db.child(".info/serverTimeOffset").observe(.value) { [weak self] snapshot in
+            if let offset = snapshot.value as? TimeInterval {
+                self?.serverTimeOffset = offset
+                print("📡 Server time offset: \(offset)ms")
+            }
+        }
+    }
 
     // MARK: - User Registration
 
@@ -61,12 +72,14 @@ class RealtimeManager {
     func setPresence(userId: String, name: String) async throws {
         let presenceData: [String: Any] = [
             "name": name,
+            "isOnline": true,
             "lastOnline": ServerValue.timestamp()
         ]
 
         try await db.child("presence").child(userId).setValue(presenceData)
 
-        // Set up disconnect handler to update lastOnline when user goes offline
+        // Set up disconnect handlers for when user loses connection
+        try await db.child("presence").child(userId).child("isOnline").onDisconnectSetValue(false)
         try await db.child("presence").child(userId).child("lastOnline").onDisconnectSetValue(ServerValue.timestamp())
     }
 
@@ -74,16 +87,33 @@ class RealtimeManager {
         try await db.child("presence").child(userId).child("lastOnline").setValue(ServerValue.timestamp())
     }
 
+    func setOnline(userId: String) async throws {
+        let updates: [String: Any] = [
+            "isOnline": true,
+            "lastOnline": ServerValue.timestamp()
+        ]
+        try await db.child("presence").child(userId).updateChildValues(updates)
+    }
+
+    func setOffline(userId: String) async throws {
+        let updates: [String: Any] = [
+            "isOnline": false,
+            "lastOnline": ServerValue.timestamp()
+        ]
+        try await db.child("presence").child(userId).updateChildValues(updates)
+    }
+
     func observePresence(userId: String, completion: @escaping (Presence?) -> Void) -> DatabaseHandle {
         return db.child("presence").child(userId).observe(.value) { snapshot in
             guard let data = snapshot.value as? [String: Any],
                   let name = data["name"] as? String,
+                  let isOnline = data["isOnline"] as? Bool,
                   let lastOnline = data["lastOnline"] as? TimeInterval else {
                 completion(nil)
                 return
             }
 
-            completion(Presence(name: name, lastOnline: lastOnline))
+            completion(Presence(name: name, isOnline: isOnline, lastOnline: lastOnline))
         }
     }
 
@@ -213,7 +243,11 @@ class RealtimeManager {
                     text: text,
                     timestamp: timestamp,
                     status: status,
-                    readBy: readBy
+                    readBy: readBy,
+                    embeddingId: messageData["embeddingId"] as? String,
+                    translatedText: messageData["translatedText"] as? String,
+                    detectedLanguage: messageData["detectedLanguage"] as? String,
+                    translatedTo: messageData["translatedTo"] as? String
                 )
 
                 messages.append(message)
@@ -299,6 +333,36 @@ class RealtimeManager {
         }
 
         return unreadCount
+    }
+
+    // MARK: - User Preferences
+
+    func getUserPreferences(userId: String) async throws -> UserPreferences? {
+        let snapshot = try await db.child("userPreferences").child(userId).getData()
+
+        guard let data = snapshot.value as? [String: Any] else {
+            return nil
+        }
+
+        let preferredLanguage = data["preferredLanguage"] as? String ?? "en"
+        let autoTranslate = data["autoTranslate"] as? Bool ?? false
+        let showLanguageBadges = data["showLanguageBadges"] as? Bool ?? true
+
+        return UserPreferences(
+            preferredLanguage: preferredLanguage,
+            autoTranslate: autoTranslate,
+            showLanguageBadges: showLanguageBadges
+        )
+    }
+
+    func saveUserPreferences(userId: String, preferences: UserPreferences) async throws {
+        let preferencesData: [String: Any] = [
+            "preferredLanguage": preferences.preferredLanguage,
+            "autoTranslate": preferences.autoTranslate,
+            "showLanguageBadges": preferences.showLanguageBadges
+        ]
+
+        try await db.child("userPreferences").child(userId).setValue(preferencesData)
     }
 
     // MARK: - Remove Observers

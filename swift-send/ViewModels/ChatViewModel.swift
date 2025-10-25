@@ -22,6 +22,8 @@ class ChatViewModel: ObservableObject {
     private var messagesObserverHandle: DatabaseHandle?
     private var presenceObserverHandles: [String: DatabaseHandle] = [:]
     private let realtimeManager = RealtimeManager.shared
+    private let presenceManager = PresenceManager.shared
+    private var timerCancellable: AnyCancellable?
 
     init(conversationId: String, currentUserId: String, participants: [String]) {
         self.conversationId = conversationId
@@ -30,6 +32,7 @@ class ChatViewModel: ObservableObject {
         loadMessages()
         markMessagesAsRead()
         observeParticipantPresence()
+        startPresenceTimer()
     }
 
     deinit {
@@ -41,6 +44,9 @@ class ChatViewModel: ObservableObject {
         for (userId, handle) in presenceObserverHandles {
             realtimeManager.removeObserver(handle: handle, path: "presence/\(userId)")
         }
+
+        // Cancel timer subscription
+        timerCancellable?.cancel()
     }
 
     private func loadMessages() {
@@ -186,17 +192,10 @@ class ChatViewModel: ObservableObject {
         }
 
         let name = user.displayName ?? user.email
+        let isOnline = presence?.isOnline ?? false
         let lastOnline = presence?.lastOnline
 
-        // Consider online if last activity was within 10 seconds
-        let isOnline: Bool
-        if let lastOnline = lastOnline {
-            let tenSecondsAgo = Date().timeIntervalSince1970 * 1000 - 10_000 // 10 seconds in milliseconds
-            isOnline = lastOnline > tenSecondsAgo
-        } else {
-            isOnline = false
-        }
-
+        // Create participant info with explicit status
         let info = ParticipantInfo(
             id: userId,
             name: name,
@@ -210,5 +209,16 @@ class ChatViewModel: ObservableObject {
         } else {
             participantInfo.append(info)
         }
+    }
+
+    private func startPresenceTimer() {
+        // Subscribe to the centralized presence timer
+        // Every second, trigger a UI refresh to update "Last seen" text (e.g., "1m ago" → "2m ago")
+        timerCancellable = presenceManager.timer
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                // Force UI update to refresh relative timestamps
+                self.objectWillChange.send()
+            }
     }
 }

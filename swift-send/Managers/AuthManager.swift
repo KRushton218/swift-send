@@ -16,7 +16,7 @@ class AuthManager: ObservableObject {
 
     private var authStateHandler: AuthStateDidChangeListenerHandle?
     private let realtimeManager = RealtimeManager.shared
-    private var presenceHeartbeatTimer: Timer?
+    nonisolated(unsafe) private var presenceHeartbeatTimer: Timer?
     private var lifecycleObservers: [NSObjectProtocol] = []
 
     init() {
@@ -28,7 +28,9 @@ class AuthManager: ObservableObject {
         if let handle = authStateHandler {
             Auth.auth().removeStateDidChangeListener(handle)
         }
-        stopPresenceHeartbeat()
+
+        // Stop presence heartbeat timer
+        presenceHeartbeatTimer?.invalidate()
 
         // Remove lifecycle observers
         lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) }
@@ -77,19 +79,24 @@ class AuthManager: ObservableObject {
         // Stop heartbeat to save battery
         stopPresenceHeartbeat()
 
-        // Update lastOnline one final time before going inactive
+        // Mark as offline before going inactive
         if let userId = user?.uid {
             do {
-                try await realtimeManager.updateLastOnline(userId: userId)
+                try await realtimeManager.setOffline(userId: userId)
             } catch {
-                print("Error updating presence on background: \(error)")
+                print("Error setting offline on background: \(error)")
             }
         }
     }
 
     private func handleAppWillEnterForeground() async {
-        // Resume heartbeat if user is signed in
-        if user != nil {
+        // Mark as online and resume heartbeat if user is signed in
+        if let userId = user?.uid {
+            do {
+                try await realtimeManager.setOnline(userId: userId)
+            } catch {
+                print("Error setting online on foreground: \(error)")
+            }
             startPresenceHeartbeat()
         }
     }
@@ -145,10 +152,10 @@ class AuthManager: ObservableObject {
         // Stop presence heartbeat
         stopPresenceHeartbeat()
 
-        // Update last online before signing out
+        // Mark as offline before signing out
         if let userId = user?.uid {
             Task {
-                try? await realtimeManager.updateLastOnline(userId: userId)
+                try? await realtimeManager.setOffline(userId: userId)
             }
         }
 
@@ -167,9 +174,9 @@ class AuthManager: ObservableObject {
 
         // Create timer that fires every 1 second
         presenceHeartbeatTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self, let userId = self.user?.uid else { return }
+            Task { @MainActor [weak self] in
+                guard let self = self, let userId = self.user?.uid else { return }
 
-            Task { @MainActor in
                 do {
                     try await self.realtimeManager.updateLastOnline(userId: userId)
                 } catch {

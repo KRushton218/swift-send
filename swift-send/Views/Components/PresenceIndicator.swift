@@ -52,10 +52,8 @@ struct ParticipantInfo: Identifiable {
         if isOnline {
             return "Online"
         } else if let lastOnline = lastOnline {
-            let date = Date(timeIntervalSince1970: lastOnline / 1000)
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .short
-            return "Last seen \(formatter.localizedString(for: date, relativeTo: Date()))"
+            let offset = RealtimeManager.shared.serverTimeOffset
+            return "Last seen \(PresenceManager.shared.formatLastSeen(lastOnline, serverTimeOffset: offset))"
         } else {
             return "Offline"
         }

@@ -19,6 +19,7 @@ struct UserProfile: Identifiable, Codable {
 // MARK: - Presence
 struct Presence: Codable {
     var name: String
+    var isOnline: Bool
     var lastOnline: TimeInterval
 }
 
@@ -38,6 +39,16 @@ struct Message: Identifiable, Codable {
     var timestamp: TimeInterval
     var status: MessageStatus
     var readBy: [String: TimeInterval] // userId: timestamp when read
+    var embeddingId: String? // Pinecone vector ID for RAG
+
+    // Translation fields
+    var translatedText: String?
+    var detectedLanguage: String?
+    var translatedTo: String?
+
+    var hasTranslation: Bool {
+        translatedText != nil && detectedLanguage != nil && translatedTo != nil
+    }
 
     func isReadBy(userId: String) -> Bool {
         readBy.keys.contains(userId)
@@ -62,5 +73,20 @@ struct Conversation: Identifiable, Codable {
 
     var isGroupChat: Bool {
         participants.count > 2
+    }
+}
+
+// MARK: - User Preferences
+struct UserPreferences: Codable, Equatable {
+    var preferredLanguage: String
+    var autoTranslate: Bool
+    var showLanguageBadges: Bool
+
+    static var defaultPreferences: UserPreferences {
+        UserPreferences(
+            preferredLanguage: "en",
+            autoTranslate: false,
+            showLanguageBadges: true
+        )
     }
 }
