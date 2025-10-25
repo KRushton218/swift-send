@@ -6,9 +6,11 @@
 import SwiftUI
 
 struct ChatView: View {
+    @EnvironmentObject var authManager: AuthManager
     @StateObject var viewModel: ChatViewModel
     @State private var scrollProxy: ScrollViewProxy?
     @State private var userNames: [String: String] = [:]
+    @State private var preferredLanguage: String = "en" // Default to English
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +28,8 @@ struct ChatView: View {
                             MessageBubble(
                                 message: message,
                                 isFromCurrentUser: message.senderId == viewModel.currentUserId,
-                                userNames: userNames
+                                userNames: userNames,
+                                preferredLanguage: preferredLanguage
                             )
                             .id(message.id)
                         }
@@ -65,16 +68,19 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             userNames = await viewModel.getReadByNames()
+
+            // Load user's preferred language
+            if let prefs = try? await RealtimeManager.shared.getUserPreferences(userId: viewModel.currentUserId) {
+                preferredLanguage = prefs.preferredLanguage
+            }
         }
         .onAppear {
             viewModel.isActive = true
-            let participantNames = userNames.values.joined(separator: ", ")
-            print("✅ ChatView appeared - notifications disabled for \(participantNames)")
+            authManager.activeConversationId = viewModel.conversationId
         }
         .onDisappear {
             viewModel.isActive = false
-            let participantNames = userNames.values.joined(separator: ", ")
-            print("❌ ChatView disappeared - notifications enabled for \(participantNames)")
+            authManager.activeConversationId = nil
         }
     }
 
