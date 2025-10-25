@@ -9,6 +9,7 @@ import FirebaseAuth
 struct ProfileView: View {
     @EnvironmentObject var authManager: AuthManager
     @Environment(\.dismiss) var dismiss
+    @State private var showPreferences = false
 
     var body: some View {
         NavigationStack {
@@ -34,6 +35,27 @@ struct ProfileView: View {
                         .font(.subheadline)
                         .foregroundColor(.gray)
                 }
+
+                // Settings Section
+                VStack(spacing: 12) {
+                    NavigationLink(destination: LanguagePreferencesView()) {
+                        HStack {
+                            Image(systemName: "globe")
+                                .foregroundColor(.blue)
+                                .frame(width: 30)
+                            Text("Language & Translation")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                    }
+                }
+                .padding(.horizontal)
 
                 Spacer()
 

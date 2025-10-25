@@ -9,6 +9,8 @@ struct ChatView: View {
     @StateObject var viewModel: ChatViewModel
     @State private var scrollProxy: ScrollViewProxy?
     @State private var userNames: [String: String] = [:]
+    @State private var userPreferences = UserPreferences.defaultPreferences
+    @State private var showInsights = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +28,8 @@ struct ChatView: View {
                             MessageBubble(
                                 message: message,
                                 isFromCurrentUser: message.senderId == viewModel.currentUserId,
-                                userNames: userNames
+                                userNames: userNames,
+                                preferredLanguage: userPreferences.preferredLanguage
                             )
                             .id(message.id)
                         }
@@ -63,8 +66,20 @@ struct ChatView: View {
         }
         .navigationTitle("Chat")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: { showInsights = true }) {
+                    Image(systemName: "lightbulb.fill")
+                        .foregroundColor(.orange)
+                }
+            }
+        }
+        .sheet(isPresented: $showInsights) {
+            InsightsView(conversationId: viewModel.conversationId)
+        }
         .task {
             userNames = await viewModel.getReadByNames()
+            await loadUserPreferences()
         }
         .onAppear {
             viewModel.isActive = true
@@ -83,6 +98,19 @@ struct ChatView: View {
             withAnimation {
                 scrollProxy?.scrollTo(lastMessage.id, anchor: .bottom)
             }
+        }
+    }
+
+    private func loadUserPreferences() async {
+        let userId = viewModel.currentUserId
+
+        do {
+            let realtimeManager = RealtimeManager.shared
+            if let prefs = try await realtimeManager.getUserPreferences(userId: userId) {
+                userPreferences = prefs
+            }
+        } catch {
+            print("Failed to load user preferences: \(error)")
         }
     }
 }

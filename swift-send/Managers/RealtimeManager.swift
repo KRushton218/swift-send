@@ -301,6 +301,37 @@ class RealtimeManager {
         return unreadCount
     }
 
+    // MARK: - User Preferences
+
+    func getUserPreferences(userId: String) async throws -> UserPreferences? {
+        let snapshot = try await db.child("userPreferences").child(userId).getData()
+
+        guard snapshot.exists(),
+              let data = snapshot.value as? [String: Any] else {
+            return nil
+        }
+
+        let preferredLanguage = data["preferredLanguage"] as? String ?? "en"
+        let autoTranslate = data["autoTranslate"] as? Bool ?? false
+        let showLanguageBadges = data["showLanguageBadges"] as? Bool ?? true
+
+        return UserPreferences(
+            preferredLanguage: preferredLanguage,
+            autoTranslate: autoTranslate,
+            showLanguageBadges: showLanguageBadges
+        )
+    }
+
+    func saveUserPreferences(userId: String, preferences: UserPreferences) async throws {
+        let data: [String: Any] = [
+            "preferredLanguage": preferences.preferredLanguage,
+            "autoTranslate": preferences.autoTranslate,
+            "showLanguageBadges": preferences.showLanguageBadges
+        ]
+
+        try await db.child("userPreferences").child(userId).setValue(data)
+    }
+
     // MARK: - Remove Observers
 
     nonisolated func removeObserver(handle: DatabaseHandle, path: String) {
