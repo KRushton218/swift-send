@@ -14,6 +14,24 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Offline connection banner
+            if !viewModel.isConnected {
+                HStack(spacing: 8) {
+                    Image(systemName: "wifi.slash")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+
+                    Text("No connection - Messages will be sent when you're back online")
+                        .font(.caption)
+                        .foregroundColor(.primary)
+
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.15))
+            }
+
             // Participant presence header
             if !viewModel.participantInfo.isEmpty {
                 ParticipantHeader(participants: viewModel.participantInfo)
