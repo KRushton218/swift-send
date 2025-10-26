@@ -93,6 +93,11 @@ class RealtimeManager {
             "lastOnline": ServerValue.timestamp()
         ]
         try await db.child("presence").child(userId).updateChildValues(updates)
+
+        // Re-register disconnect handlers to handle reconnections
+        // This ensures that if we disconnect again, we'll be marked offline
+        try await db.child("presence").child(userId).child("isOnline").onDisconnectSetValue(false)
+        try await db.child("presence").child(userId).child("lastOnline").onDisconnectSetValue(ServerValue.timestamp())
     }
 
     func setOffline(userId: String) async throws {
@@ -114,6 +119,57 @@ class RealtimeManager {
             }
 
             completion(Presence(name: name, isOnline: isOnline, lastOnline: lastOnline))
+        }
+    }
+
+    // MARK: - Typing Indicators
+
+    func setTyping(conversationId: String, userId: String, name: String, isTyping: Bool) async throws {
+        let typingPath = db.child("typing").child(conversationId).child(userId)
+
+        if isTyping {
+            let typingData: [String: Any] = [
+                "name": name,
+                "timestamp": ServerValue.timestamp(),
+                "isTyping": true
+            ]
+
+            try await typingPath.setValue(typingData)
+
+            // Auto-clear typing indicator on disconnect
+            try await typingPath.onDisconnectRemoveValue()
+        } else {
+            // Remove typing indicator when user stops typing
+            try await typingPath.removeValue()
+        }
+    }
+
+    func observeTypingIndicators(conversationId: String, completion: @escaping ([TypingIndicator]) -> Void) -> DatabaseHandle {
+        return db.child("typing").child(conversationId).observe(.value) { snapshot in
+            guard let typingDict = snapshot.value as? [String: [String: Any]] else {
+                completion([])
+                return
+            }
+
+            var typingUsers: [TypingIndicator] = []
+
+            for (userId, typingData) in typingDict {
+                guard let name = typingData["name"] as? String,
+                      let timestamp = typingData["timestamp"] as? TimeInterval,
+                      let isTyping = typingData["isTyping"] as? Bool,
+                      isTyping else {
+                    continue
+                }
+
+                typingUsers.append(TypingIndicator(
+                    id: userId,
+                    name: name,
+                    timestamp: timestamp,
+                    isTyping: isTyping
+                ))
+            }
+
+            completion(typingUsers)
         }
     }
 

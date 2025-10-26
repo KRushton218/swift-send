@@ -29,10 +29,14 @@ struct ChatView: View {
                                 message: message,
                                 isFromCurrentUser: message.senderId == viewModel.currentUserId,
                                 userNames: userNames,
-                                preferredLanguage: preferredLanguage
+                                preferredLanguage: preferredLanguage,
+                                isGroupChat: viewModel.participants.count > 2
                             )
                             .id(message.id)
                         }
+
+                        // Typing indicator
+                        TypingIndicatorView(typingUsers: viewModel.typingUsers)
                     }
                     .padding(.vertical)
                 }
@@ -52,6 +56,9 @@ struct ChatView: View {
                 TextField("Message", text: $viewModel.messageText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
+                    .onChange(of: viewModel.messageText) { _, _ in
+                        viewModel.onMessageTextChanged()
+                    }
 
                 Button {
                     viewModel.sendMessage()
@@ -81,6 +88,7 @@ struct ChatView: View {
         .onDisappear {
             viewModel.isActive = false
             authManager.activeConversationId = nil
+            viewModel.onViewDisappear()
         }
     }
 
