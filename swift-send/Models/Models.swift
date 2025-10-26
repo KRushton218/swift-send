@@ -23,6 +23,14 @@ struct Presence: Codable {
     var lastOnline: TimeInterval
 }
 
+// MARK: - Typing Indicator
+struct TypingIndicator: Codable, Identifiable {
+    var id: String // userId
+    var name: String
+    var timestamp: TimeInterval
+    var isTyping: Bool
+}
+
 // MARK: - Message Status
 enum MessageStatus: String, Codable {
     case sending

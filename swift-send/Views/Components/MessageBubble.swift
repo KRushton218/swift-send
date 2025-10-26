@@ -10,6 +10,7 @@ struct MessageBubble: View {
     let isFromCurrentUser: Bool
     let userNames: [String: String] // userId -> displayName
     let preferredLanguage: String // User's preferred language for translation
+    let isGroupChat: Bool // Whether this is a group chat
 
     @StateObject private var translationManager = TranslationManager.shared
     @State private var showTranslateButton = true
@@ -21,6 +22,15 @@ struct MessageBubble: View {
             }
 
             VStack(alignment: isFromCurrentUser ? .trailing : .leading, spacing: 4) {
+                // Sender name (only for group chats, only for messages from others)
+                if isGroupChat && !isFromCurrentUser {
+                    Text(senderName)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.gray)
+                        .padding(.horizontal, 4)
+                }
+
                 // Main message bubble
                 VStack(alignment: .leading, spacing: 8) {
                     // Original text
@@ -217,5 +227,9 @@ struct MessageBubble: View {
         let readers = message.readByUsers(excluding: message.senderId)
         let names = readers.compactMap { userNames[$0] }
         return names.joined(separator: ", ")
+    }
+
+    private var senderName: String {
+        userNames[message.senderId] ?? "Unknown"
     }
 }

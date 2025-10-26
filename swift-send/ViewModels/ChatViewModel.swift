@@ -14,6 +14,7 @@ class ChatViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var participantInfo: [ParticipantInfo] = []
     @Published var isActive = false  // Track if this chat view is currently active
+    @Published var typingUsers: [TypingIndicator] = []  // Who is currently typing
 
     let conversationId: String
     let currentUserId: String
@@ -21,9 +22,14 @@ class ChatViewModel: ObservableObject {
 
     private var messagesObserverHandle: DatabaseHandle?
     private var presenceObserverHandles: [String: DatabaseHandle] = [:]
+    private var typingObserverHandle: DatabaseHandle?
     private let realtimeManager = RealtimeManager.shared
     private let presenceManager = PresenceManager.shared
     private var timerCancellable: AnyCancellable?
+    private var typingTimer: Timer?
+    private var lastTypingUpdate: Date?
+    private let typingDebounceInterval: TimeInterval = 1.0  // Max 1 update per second
+    private let typingTimeoutInterval: TimeInterval = 5.0   // Clear after 5 seconds of inactivity
 
     init(conversationId: String, currentUserId: String, participants: [String]) {
         self.conversationId = conversationId
@@ -32,6 +38,7 @@ class ChatViewModel: ObservableObject {
         loadMessages()
         markMessagesAsRead()
         observeParticipantPresence()
+        observeTypingIndicators()
         startPresenceTimer()
     }
 
@@ -45,8 +52,18 @@ class ChatViewModel: ObservableObject {
             realtimeManager.removeObserver(handle: handle, path: "presence/\(userId)")
         }
 
-        // Cancel timer subscription
+        // Remove typing observer
+        if let handle = typingObserverHandle {
+            realtimeManager.removeObserver(handle: handle, path: "typing/\(conversationId)")
+        }
+
+        // Cancel timers
         timerCancellable?.cancel()
+        typingTimer?.invalidate()
+
+        // Note: Typing state will be cleared automatically by Firebase's onDisconnect handler
+        // set in RealtimeManager.setTyping(). We don't call clearTypingState() here to avoid
+        // retain cycles from creating Tasks in deinit.
     }
 
     private func loadMessages() {
@@ -103,6 +120,11 @@ class ChatViewModel: ObservableObject {
         let text = messageText
         messageText = ""
         isLoading = true
+
+        // Clear typing indicator when sending message
+        Task {
+            try? await clearTypingState()
+        }
 
         Task {
             do {
@@ -187,5 +209,89 @@ class ChatViewModel: ObservableObject {
                 // Force UI update to refresh relative timestamps
                 self.objectWillChange.send()
             }
+    }
+
+    // MARK: - Lifecycle
+
+    func onViewDisappear() {
+        Task {
+            try? await clearTypingState()
+        }
+    }
+
+    // MARK: - Typing Indicators
+
+    private func observeTypingIndicators() {
+        typingObserverHandle = realtimeManager.observeTypingIndicators(conversationId: conversationId) { [weak self] typingIndicators in
+            guard let self = self else { return }
+            Task { @MainActor in
+                // Filter out current user's typing indicator (don't show your own typing)
+                self.typingUsers = typingIndicators.filter { $0.id != self.currentUserId }
+                print("⌨️ Typing indicators updated: \(self.typingUsers.count) users typing")
+                for user in self.typingUsers {
+                    print("   - \(user.name) is typing")
+                }
+            }
+        }
+    }
+
+    func onMessageTextChanged() {
+        // Reset the auto-clear timer
+        resetTypingTimer()
+
+        // Debounce: only update if enough time has passed since last update
+        let now = Date()
+        if let lastUpdate = lastTypingUpdate,
+           now.timeIntervalSince(lastUpdate) < typingDebounceInterval {
+            print("⌨️ Typing update debounced (too soon)")
+            return
+        }
+
+        lastTypingUpdate = now
+
+        // Update typing state
+        Task {
+            guard let userName = await getUserDisplayName() else {
+                print("⌨️ Could not get user display name for typing indicator")
+                return
+            }
+            let isTyping = !messageText.isEmpty
+            print("⌨️ Sending typing indicator: \(userName) isTyping=\(isTyping)")
+            try? await realtimeManager.setTyping(
+                conversationId: conversationId,
+                userId: currentUserId,
+                name: userName,
+                isTyping: isTyping
+            )
+        }
+    }
+
+    private func clearTypingState() async {
+        guard let userName = await getUserDisplayName() else { return }
+        try? await realtimeManager.setTyping(
+            conversationId: conversationId,
+            userId: currentUserId,
+            name: userName,
+            isTyping: false
+        )
+        typingTimer?.invalidate()
+        typingTimer = nil
+        lastTypingUpdate = nil
+    }
+
+    private func resetTypingTimer() {
+        typingTimer?.invalidate()
+        typingTimer = Timer.scheduledTimer(withTimeInterval: typingTimeoutInterval, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                await self?.clearTypingState()
+            }
+        }
+    }
+
+    private func getUserDisplayName() async -> String? {
+        guard let user = try? await realtimeManager.getUser(userId: currentUserId) else {
+            return nil
+        }
+        return user.displayName ?? user.email
     }
 }

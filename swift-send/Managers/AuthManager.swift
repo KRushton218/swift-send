@@ -26,7 +26,11 @@ class AuthManager: ObservableObject {
     private var globalMessageObserverHandles: [String: DatabaseHandle] = [:]
     private var lastSeenMessageIds: [String: String] = [:] // conversationId: lastMessageId
 
+    // UserDefaults key for persisting last seen message IDs
+    private let lastSeenMessageIdsKey = "com.swiftsend.lastSeenMessageIds"
+
     init() {
+        loadPersistedLastSeenMessageIds()
         registerAuthStateHandler()
         setupLifecycleObservers()
     }
@@ -49,6 +53,21 @@ class AuthManager: ObservableObject {
         }
         // Note: globalConversationListenerHandle cleanup handled by Firebase automatically
     }
+
+    // MARK: - Persistence
+
+    private func loadPersistedLastSeenMessageIds() {
+        if let persisted = UserDefaults.standard.dictionary(forKey: lastSeenMessageIdsKey) as? [String: String] {
+            lastSeenMessageIds = persisted
+            print("💾 Loaded \(persisted.count) persisted last seen message IDs")
+        }
+    }
+
+    private func saveLastSeenMessageIds() {
+        UserDefaults.standard.set(lastSeenMessageIds, forKey: lastSeenMessageIdsKey)
+    }
+
+    // MARK: - Authentication
 
     private func registerAuthStateHandler() {
         authStateHandler = Auth.auth().addStateDidChangeListener { [weak self] _, user in
@@ -118,10 +137,8 @@ class AuthManager: ObservableObject {
     private func setupUserOnSignIn(userId: String, email: String) async {
         do {
             // Register user in RTDB if not exists
-            let existingUser = try await realtimeManager.getUser(userId: userId)
-            if existingUser == nil {
-                try await realtimeManager.registerUser(userId: userId, email: email, displayName: email)
-            }
+            // Use registerUser which internally handles upsert logic (won't overwrite if exists)
+            try await realtimeManager.registerUser(userId: userId, email: email, displayName: email)
 
             // Set presence
             try await realtimeManager.setPresence(userId: userId, name: email)
@@ -198,7 +215,9 @@ class AuthManager: ObservableObject {
                 guard let self = self, let userId = self.user?.uid else { return }
 
                 do {
-                    try await self.realtimeManager.updateLastOnline(userId: userId)
+                    // Use setOnline to update both isOnline and lastOnline
+                    // This ensures presence is maintained even after brief network disconnects
+                    try await self.realtimeManager.setOnline(userId: userId)
                 } catch {
                     print("Error updating presence heartbeat: \(error)")
                 }
@@ -280,17 +299,17 @@ class AuthManager: ObservableObject {
                 }
             }
         } else {
-            // First time observing this conversation
-            // Only notify about the very latest message to avoid spam on app launch
-            if let latestMessage = messagesFromOthers.last {
-                newMessages = [latestMessage]
-            }
+            // First time observing this conversation (no persisted ID)
+            // Don't send any notifications - just initialize the ID to prevent duplicates
+            // This happens on app launch/sign-in before any messages have been "seen"
+            print("💾 First observation of conversation \(conversationId) - initializing without notification")
         }
 
         // ALWAYS update last seen message ID, even if we suppress notification
         // This prevents batching notifications when user leaves the conversation
         if let latestMessage = messagesFromOthers.last {
             lastSeenMessageIds[conversationId] = latestMessage.id
+            saveLastSeenMessageIds() // Persist to UserDefaults
         }
 
         // Don't send notifications for the active conversation (but we still updated lastSeenMessageIds above)
@@ -328,12 +347,18 @@ class AuthManager: ObservableObject {
     func stopGlobalMessageListener() {
         print("🌐 Stopping global message listener")
 
+        // Save last seen message IDs before clearing
+        saveLastSeenMessageIds()
+
         // Remove all message observers
         for (conversationId, handle) in globalMessageObserverHandles {
             realtimeManager.removeObserver(handle: handle, path: "conversations/\(conversationId)/messages")
         }
         globalMessageObserverHandles.removeAll()
-        lastSeenMessageIds.removeAll()
+
+        // Don't clear lastSeenMessageIds - they're persisted and should survive sign-out
+        // This prevents notification spam if user signs back in immediately
+        // lastSeenMessageIds.removeAll()
 
         // Note: Conversation observer is handled by RealtimeManager
         // We just clear the handle reference
