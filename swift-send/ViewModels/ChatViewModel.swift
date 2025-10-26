@@ -81,33 +81,41 @@ class ChatViewModel: ObservableObject {
         messagesObserverHandle = realtimeManager.observeMessages(for: conversationId) { [weak self] firebaseMessages in
             guard let self = self else { return }
             Task { @MainActor in
-                // Merge Firebase messages with pending local messages
-                // Keep pending messages that are still sending or failed
-                let pendingLocalMessages = self.messages.filter { message in
-                    self.pendingMessages.keys.contains(message.id) &&
-                    (message.status == .sending || message.status == .failed)
-                }
+                print("📨 Firebase observer fired with \(firebaseMessages.count) messages")
+                print("📨 Current pending messages: \(self.pendingMessages.count)")
 
-                // Combine Firebase messages with pending local messages
+                // Start with Firebase messages
                 var allMessages = firebaseMessages
-                for pending in pendingLocalMessages {
-                    // Only add if not already in Firebase messages (by text/timestamp match)
-                    let isDuplicate = firebaseMessages.contains { fb in
-                        fb.text == pending.text &&
-                        fb.senderId == pending.senderId &&
-                        abs(fb.timestamp - pending.timestamp) < 5000 // Within 5 seconds
+
+                // Check each pending message to see if Firebase has it
+                var idsToRemoveFromPending: Set<String> = []
+
+                for (pendingId, pendingMessage) in self.pendingMessages {
+                    // Match by text + sender ONLY (timestamps will differ: local vs server)
+                    let firebaseHasIt = firebaseMessages.contains { fb in
+                        fb.text == pendingMessage.text &&
+                        fb.senderId == pendingMessage.senderId
                     }
 
-                    if !isDuplicate {
-                        allMessages.append(pending)
+                    if firebaseHasIt {
+                        // Firebase confirmed this message - remove from pending
+                        idsToRemoveFromPending.insert(pendingId)
+                        print("✅ Pending message '\(pendingMessage.text)' found in Firebase, removing from pending")
                     } else {
-                        // Firebase has it - remove from pending queue
-                        self.pendingMessages.removeValue(forKey: pending.id)
+                        // Firebase doesn't have it yet - keep showing optimistic version
+                        allMessages.append(pendingMessage)
+                        print("⏳ Pending message '\(pendingMessage.text)' not in Firebase yet, keeping optimistic version")
                     }
                 }
 
-                // Sort by timestamp
+                // Clean up pending messages that Firebase now has
+                for id in idsToRemoveFromPending {
+                    self.pendingMessages.removeValue(forKey: id)
+                }
+
+                // Sort by timestamp and update UI
                 self.messages = allMessages.sorted { $0.timestamp < $1.timestamp }
+                print("📨 Final message count: \(self.messages.count), Pending: \(self.pendingMessages.count)")
 
                 // Mark new messages as read when they arrive
                 await self.markNewMessagesAsRead()
@@ -132,7 +140,6 @@ class ChatViewModel: ObservableObject {
             }
         }
     }
-
     func markMessagesAsRead() {
         Task {
             do {
@@ -187,10 +194,9 @@ class ChatViewModel: ObservableObject {
                     text: text
                 )
 
-                // Success - remove from pending queue
-                // Firebase observer will update the message with server data
-                pendingMessages.removeValue(forKey: messageId)
-                print("✅ Message sent successfully")
+                // Success - Firebase write queued (with offline persistence, returns immediately)
+                // DON'T remove from pending yet - only remove when Firebase observer confirms it
+                print("✅ Message write queued to Firebase")
 
             } catch {
                 // Failed - mark as failed
