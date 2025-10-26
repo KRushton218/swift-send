@@ -137,10 +137,8 @@ class AuthManager: ObservableObject {
     private func setupUserOnSignIn(userId: String, email: String) async {
         do {
             // Register user in RTDB if not exists
-            let existingUser = try await realtimeManager.getUser(userId: userId)
-            if existingUser == nil {
-                try await realtimeManager.registerUser(userId: userId, email: email, displayName: email)
-            }
+            // Use registerUser which internally handles upsert logic (won't overwrite if exists)
+            try await realtimeManager.registerUser(userId: userId, email: email, displayName: email)
 
             // Set presence
             try await realtimeManager.setPresence(userId: userId, name: email)

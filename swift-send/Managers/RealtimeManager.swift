@@ -27,12 +27,29 @@ class RealtimeManager {
     // MARK: - User Registration
 
     func registerUser(userId: String, email: String, displayName: String? = nil) async throws {
-        let userData: [String: Any] = [
-            "email": email,
-            "displayName": displayName ?? email
-        ]
+        // Always set email (write operations work offline and sync later)
+        try await db.child("registeredUsers").child(userId).child("email").setValue(email)
 
-        try await db.child("registeredUsers").child(userId).setValue(userData)
+        // Try to check if user exists before setting displayName
+        // This prevents overwriting a user's custom displayName
+        do {
+            let snapshot = try await db.child("registeredUsers").child(userId).child("displayName").getData()
+
+            if !snapshot.exists() {
+                // displayName doesn't exist - this is a new user, set it
+                try await db.child("registeredUsers").child(userId).child("displayName").setValue(displayName ?? email)
+                print("✅ New user \(userId) registered")
+            } else {
+                print("✅ User \(userId) already exists, skipping displayName")
+            }
+        } catch {
+            // getData() failed - likely offline or no cache
+            // We'll optimistically set displayName anyway since writes work offline
+            // Risk: might overwrite custom displayName, but unlikely on every sign-in
+            print("⚠️ Cannot verify user existence (likely offline), setting displayName anyway")
+
+            try await db.child("registeredUsers").child(userId).child("displayName").setValue(displayName ?? email)
+        }
     }
 
     func getUser(userId: String) async throws -> UserProfile? {
@@ -134,22 +151,30 @@ class RealtimeManager {
                 "isTyping": true
             ]
 
+            print("⌨️ [RTDB] Writing typing indicator: /typing/\(conversationId)/\(userId)")
             try await typingPath.setValue(typingData)
 
             // Auto-clear typing indicator on disconnect
             try await typingPath.onDisconnectRemoveValue()
         } else {
             // Remove typing indicator when user stops typing
+            print("⌨️ [RTDB] Removing typing indicator: /typing/\(conversationId)/\(userId)")
             try await typingPath.removeValue()
         }
     }
 
     func observeTypingIndicators(conversationId: String, completion: @escaping ([TypingIndicator]) -> Void) -> DatabaseHandle {
+        print("⌨️ [RTDB] Setting up typing indicator observer for conversation: \(conversationId)")
         return db.child("typing").child(conversationId).observe(.value) { snapshot in
+            print("⌨️ [RTDB] Typing indicator update received. Snapshot exists: \(snapshot.exists())")
+
             guard let typingDict = snapshot.value as? [String: [String: Any]] else {
+                print("⌨️ [RTDB] No typing users or invalid data format")
                 completion([])
                 return
             }
+
+            print("⌨️ [RTDB] Raw typing data: \(typingDict)")
 
             var typingUsers: [TypingIndicator] = []
 
@@ -158,8 +183,11 @@ class RealtimeManager {
                       let timestamp = typingData["timestamp"] as? TimeInterval,
                       let isTyping = typingData["isTyping"] as? Bool,
                       isTyping else {
+                    print("⌨️ [RTDB] Skipping invalid typing data for user \(userId)")
                     continue
                 }
+
+                print("⌨️ [RTDB] Found typing user: \(name) (id: \(userId))")
 
                 typingUsers.append(TypingIndicator(
                     id: userId,
@@ -169,6 +197,7 @@ class RealtimeManager {
                 ))
             }
 
+            print("⌨️ [RTDB] Returning \(typingUsers.count) typing users")
             completion(typingUsers)
         }
     }

@@ -37,6 +37,7 @@ struct ChatView: View {
 
                         // Typing indicator
                         TypingIndicatorView(typingUsers: viewModel.typingUsers)
+                            .id("typing-indicator")
                     }
                     .padding(.vertical)
                 }
@@ -46,6 +47,14 @@ struct ChatView: View {
                 }
                 .onChange(of: viewModel.messages.count) { _, _ in
                     scrollToBottom()
+                }
+                .onChange(of: viewModel.typingUsers.count) { oldCount, newCount in
+                    // Auto-scroll when someone starts typing
+                    if newCount > 0 {
+                        withAnimation {
+                            scrollProxy?.scrollTo("typing-indicator", anchor: .bottom)
+                        }
+                    }
                 }
             }
 

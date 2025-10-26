@@ -227,6 +227,10 @@ class ChatViewModel: ObservableObject {
             Task { @MainActor in
                 // Filter out current user's typing indicator (don't show your own typing)
                 self.typingUsers = typingIndicators.filter { $0.id != self.currentUserId }
+                print("⌨️ Typing indicators updated: \(self.typingUsers.count) users typing")
+                for user in self.typingUsers {
+                    print("   - \(user.name) is typing")
+                }
             }
         }
     }
@@ -239,6 +243,7 @@ class ChatViewModel: ObservableObject {
         let now = Date()
         if let lastUpdate = lastTypingUpdate,
            now.timeIntervalSince(lastUpdate) < typingDebounceInterval {
+            print("⌨️ Typing update debounced (too soon)")
             return
         }
 
@@ -246,12 +251,17 @@ class ChatViewModel: ObservableObject {
 
         // Update typing state
         Task {
-            guard let userName = await getUserDisplayName() else { return }
+            guard let userName = await getUserDisplayName() else {
+                print("⌨️ Could not get user display name for typing indicator")
+                return
+            }
+            let isTyping = !messageText.isEmpty
+            print("⌨️ Sending typing indicator: \(userName) isTyping=\(isTyping)")
             try? await realtimeManager.setTyping(
                 conversationId: conversationId,
                 userId: currentUserId,
                 name: userName,
-                isTyping: !messageText.isEmpty
+                isTyping: isTyping
             )
         }
     }
