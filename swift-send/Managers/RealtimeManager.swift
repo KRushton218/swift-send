@@ -450,6 +450,18 @@ class RealtimeManager {
         try await db.child("userPreferences").child(userId).setValue(preferencesData)
     }
 
+    // MARK: - Connection Monitoring
+
+    /// Observe Firebase RTDB connection state
+    /// This is the single source of truth for connection status
+    /// Multiple observers can listen to this instead of creating duplicate .info/connected observers
+    func observeConnectionState(completion: @escaping (Bool) -> Void) -> DatabaseHandle {
+        return db.child(".info/connected").observe(.value) { snapshot in
+            let connected = snapshot.value as? Bool ?? false
+            completion(connected)
+        }
+    }
+
     // MARK: - Remove Observers
 
     nonisolated func removeObserver(handle: DatabaseHandle, path: String) {

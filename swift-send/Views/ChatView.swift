@@ -30,7 +30,10 @@ struct ChatView: View {
                                 isFromCurrentUser: message.senderId == viewModel.currentUserId,
                                 userNames: userNames,
                                 preferredLanguage: preferredLanguage,
-                                isGroupChat: viewModel.participants.count > 2
+                                isGroupChat: viewModel.participants.count > 2,
+                                onRetry: { message in
+                                    viewModel.retryMessage(message)
+                                }
                             )
                             .id(message.id)
                         }

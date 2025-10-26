@@ -11,6 +11,7 @@ struct MessageBubble: View {
     let userNames: [String: String] // userId -> displayName
     let preferredLanguage: String // User's preferred language for translation
     let isGroupChat: Bool // Whether this is a group chat
+    var onRetry: ((Message) -> Void)? = nil // Callback for retry action
 
     @StateObject private var translationManager = TranslationManager.shared
     @State private var showTranslateButton = true
@@ -219,6 +220,19 @@ struct MessageBubble: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.caption2)
                     .foregroundColor(.blue)
+            case .failed:
+                Button(action: {
+                    onRetry?(message)
+                }) {
+                    HStack(spacing: 2) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundColor(.red)
+                        Text("Tap to retry")
+                            .font(.caption2)
+                            .foregroundColor(.red)
+                    }
+                }
             }
         }
     }

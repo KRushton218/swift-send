@@ -33,9 +33,10 @@ struct TypingIndicator: Codable, Identifiable {
 
 // MARK: - Message Status
 enum MessageStatus: String, Codable {
-    case sending
-    case delivered
-    case read
+    case sending    // Message being sent (optimistic UI)
+    case delivered  // Successfully sent to server
+    case read       // Read by at least one recipient
+    case failed     // Failed to send, can retry
 }
 
 // MARK: - Message

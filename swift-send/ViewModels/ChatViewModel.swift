@@ -15,6 +15,7 @@ class ChatViewModel: ObservableObject {
     @Published var participantInfo: [ParticipantInfo] = []
     @Published var isActive = false  // Track if this chat view is currently active
     @Published var typingUsers: [TypingIndicator] = []  // Who is currently typing
+    @Published var isConnected: Bool = true  // Firebase connection status
 
     let conversationId: String
     let currentUserId: String
@@ -23,6 +24,7 @@ class ChatViewModel: ObservableObject {
     private var messagesObserverHandle: DatabaseHandle?
     private var presenceObserverHandles: [String: DatabaseHandle] = [:]
     private var typingObserverHandle: DatabaseHandle?
+    private var connectionObserverHandle: DatabaseHandle?
     private let realtimeManager = RealtimeManager.shared
     private let presenceManager = PresenceManager.shared
     private var timerCancellable: AnyCancellable?
@@ -30,6 +32,9 @@ class ChatViewModel: ObservableObject {
     private var lastTypingUpdate: Date?
     private let typingDebounceInterval: TimeInterval = 1.0  // Max 1 update per second
     private let typingTimeoutInterval: TimeInterval = 5.0   // Clear after 5 seconds of inactivity
+
+    // Pending messages queue for offline support
+    private var pendingMessages: [String: Message] = [:]  // messageId: message
 
     init(conversationId: String, currentUserId: String, participants: [String]) {
         self.conversationId = conversationId
@@ -39,6 +44,7 @@ class ChatViewModel: ObservableObject {
         markMessagesAsRead()
         observeParticipantPresence()
         observeTypingIndicators()
+        observeConnectionState()
         startPresenceTimer()
     }
 
@@ -57,6 +63,11 @@ class ChatViewModel: ObservableObject {
             realtimeManager.removeObserver(handle: handle, path: "typing/\(conversationId)")
         }
 
+        // Remove connection observer
+        if let handle = connectionObserverHandle {
+            realtimeManager.removeObserver(handle: handle, path: ".info/connected")
+        }
+
         // Cancel timers
         timerCancellable?.cancel()
         typingTimer?.invalidate()
@@ -67,10 +78,36 @@ class ChatViewModel: ObservableObject {
     }
 
     private func loadMessages() {
-        messagesObserverHandle = realtimeManager.observeMessages(for: conversationId) { [weak self] messages in
+        messagesObserverHandle = realtimeManager.observeMessages(for: conversationId) { [weak self] firebaseMessages in
             guard let self = self else { return }
             Task { @MainActor in
-                self.messages = messages
+                // Merge Firebase messages with pending local messages
+                // Keep pending messages that are still sending or failed
+                let pendingLocalMessages = self.messages.filter { message in
+                    self.pendingMessages.keys.contains(message.id) &&
+                    (message.status == .sending || message.status == .failed)
+                }
+
+                // Combine Firebase messages with pending local messages
+                var allMessages = firebaseMessages
+                for pending in pendingLocalMessages {
+                    // Only add if not already in Firebase messages (by text/timestamp match)
+                    let isDuplicate = firebaseMessages.contains { fb in
+                        fb.text == pending.text &&
+                        fb.senderId == pending.senderId &&
+                        abs(fb.timestamp - pending.timestamp) < 5000 // Within 5 seconds
+                    }
+
+                    if !isDuplicate {
+                        allMessages.append(pending)
+                    } else {
+                        // Firebase has it - remove from pending queue
+                        self.pendingMessages.removeValue(forKey: pending.id)
+                    }
+                }
+
+                // Sort by timestamp
+                self.messages = allMessages.sorted { $0.timestamp < $1.timestamp }
 
                 // Mark new messages as read when they arrive
                 await self.markNewMessagesAsRead()
@@ -119,13 +156,29 @@ class ChatViewModel: ObservableObject {
 
         let text = messageText
         messageText = ""
-        isLoading = true
 
         // Clear typing indicator when sending message
         Task {
             try? await clearTypingState()
         }
 
+        // Create optimistic message with local ID
+        let messageId = UUID().uuidString
+        let optimisticMessage = Message(
+            id: messageId,
+            conversationId: conversationId,
+            senderId: currentUserId,
+            text: text,
+            timestamp: Date().timeIntervalSince1970 * 1000, // Convert to milliseconds
+            status: .sending,
+            readBy: [currentUserId: Date().timeIntervalSince1970 * 1000]
+        )
+
+        // Show immediately in UI (optimistic update)
+        messages.append(optimisticMessage)
+        pendingMessages[messageId] = optimisticMessage
+
+        // Actually send to Firebase
         Task {
             do {
                 _ = try await realtimeManager.sendMessage(
@@ -133,13 +186,25 @@ class ChatViewModel: ObservableObject {
                     senderId: currentUserId,
                     text: text
                 )
+
+                // Success - remove from pending queue
+                // Firebase observer will update the message with server data
+                pendingMessages.removeValue(forKey: messageId)
+                print("✅ Message sent successfully")
+
             } catch {
-                // Restore message text on error
-                await MainActor.run {
-                    messageText = text
+                // Failed - mark as failed
+                var failedMessage = optimisticMessage
+                failedMessage.status = .failed
+                pendingMessages[messageId] = failedMessage
+
+                // Update UI
+                if let index = messages.firstIndex(where: { $0.id == messageId }) {
+                    messages[index] = failedMessage
                 }
+
+                print("❌ Message failed to send: \(error.localizedDescription)")
             }
-            isLoading = false
         }
     }
 
@@ -293,5 +358,91 @@ class ChatViewModel: ObservableObject {
             return nil
         }
         return user.displayName ?? user.email
+    }
+
+    // MARK: - Connection Monitoring & Message Retry
+
+    private func observeConnectionState() {
+        connectionObserverHandle = realtimeManager.observeConnectionState { [weak self] connected in
+            guard let self = self else { return }
+            Task { @MainActor in
+                self.isConnected = connected
+                print("🌐 Connection state: \(connected ? "✅ Online" : "❌ Offline")")
+
+                // Auto-retry pending messages when reconnected
+                if connected {
+                    await self.retryPendingMessages()
+                }
+            }
+        }
+    }
+
+    private func retryPendingMessages() async {
+        guard !pendingMessages.isEmpty else { return }
+
+        print("🔄 Retrying \(pendingMessages.count) pending messages")
+
+        for (messageId, var message) in pendingMessages {
+            do {
+                // Try to send the message
+                _ = try await realtimeManager.sendMessage(
+                    conversationId: conversationId,
+                    senderId: currentUserId,
+                    text: message.text
+                )
+
+                // Success - remove from pending queue
+                pendingMessages.removeValue(forKey: messageId)
+                print("✅ Message \(messageId) sent successfully")
+
+            } catch {
+                // Still failed - mark as failed
+                message.status = .failed
+                pendingMessages[messageId] = message
+
+                // Update UI
+                if let index = messages.firstIndex(where: { $0.id == messageId }) {
+                    messages[index] = message
+                }
+
+                print("❌ Message \(messageId) failed to send: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func retryMessage(_ message: Message) {
+        Task {
+            var updatedMessage = message
+            updatedMessage.status = .sending
+
+            // Update UI immediately
+            if let index = messages.firstIndex(where: { $0.id == message.id }) {
+                messages[index] = updatedMessage
+            }
+
+            do {
+                // Try to send
+                _ = try await realtimeManager.sendMessage(
+                    conversationId: conversationId,
+                    senderId: currentUserId,
+                    text: message.text
+                )
+
+                // Success - remove from pending queue
+                pendingMessages.removeValue(forKey: message.id)
+                print("✅ Retry successful for message \(message.id)")
+
+            } catch {
+                // Failed again
+                updatedMessage.status = .failed
+                pendingMessages[message.id] = updatedMessage
+
+                if let index = messages.firstIndex(where: { $0.id == message.id }) {
+                    messages[index] = updatedMessage
+                }
+
+                print("❌ Retry failed for message \(message.id): \(error.localizedDescription)")
+            }
+        }
     }
 }
