@@ -30,6 +30,9 @@ struct ChatView: View {
     @State private var userNames: [String: String] = [:]  // View-only cache
     @State private var preferredLanguage: String = "en"  // View-only preference
     @State private var showTranslationExtras: Bool = true  // Show sparkles for translation details
+    @State private var showFormalityAdjuster = false  // Show formality adjuster sheet
+    @State private var formalityData: FormalityResponse?  // Formality analysis results
+    @State private var isAnalyzingFormality = false  // Loading state for formality analysis
 
     var body: some View {
         VStack(spacing: 0) {
@@ -111,6 +114,22 @@ struct ChatView: View {
                         viewModel.onMessageTextChanged()
                     }
 
+                // Formality adjuster button
+                Button {
+                    analyzeFormalityAndShow()
+                } label: {
+                    if isAnalyzingFormality {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 24))
+                            .foregroundColor(.blue)
+                    }
+                }
+                .disabled(viewModel.messageText.trimmingCharacters(in: .whitespaces).isEmpty || isAnalyzingFormality)
+
+                // Send button
                 Button {
                     viewModel.sendMessage()
                 } label: {
@@ -142,12 +161,44 @@ struct ChatView: View {
             authManager.activeConversationId = nil
             viewModel.onViewDisappear()
         }
+        .sheet(isPresented: $showFormalityAdjuster) {
+            if let formalityData = formalityData {
+                FormalityAdjusterSheet(
+                    formalityData: formalityData,
+                    selectedText: $viewModel.messageText
+                )
+            }
+        }
     }
 
     private func scrollToBottom() {
         if let lastMessage = viewModel.messages.last {
             withAnimation {
                 scrollProxy?.scrollTo(lastMessage.id, anchor: .bottom)
+            }
+        }
+    }
+
+    private func analyzeFormalityAndShow() {
+        isAnalyzingFormality = true
+
+        Task {
+            do {
+                let result = try await AIServiceManager.shared.analyzeFormalityAndGenerate(
+                    text: viewModel.messageText
+                )
+
+                await MainActor.run {
+                    formalityData = result
+                    isAnalyzingFormality = false
+                    showFormalityAdjuster = true
+                }
+            } catch {
+                await MainActor.run {
+                    isAnalyzingFormality = false
+                    // TODO: Show error alert
+                    print("❌ Formality analysis error: \(error.localizedDescription)")
+                }
             }
         }
     }

@@ -94,6 +94,38 @@ struct ErrorResponse: Codable {
     let retryAfter: Int?
 }
 
+struct FormalityRequest: Codable {
+    let text: String
+    let userId: String
+}
+
+struct FormalityFactors: Codable {
+    let conjugations: String
+    let phrasing: String
+    let figuresOfSpeech: String
+    let verbChoice: String
+    let tone: String
+}
+
+struct FormalityAnalysis: Codable {
+    let currentLevel: String  // "casual", "neutral", "formal", "business"
+    let score: Int  // 0-10
+    let factors: FormalityFactors
+}
+
+struct FormalityVariations: Codable {
+    let casual: String
+    let neutral: String
+    let formal: String
+    let business: String
+}
+
+struct FormalityResponse: Codable {
+    let originalText: String
+    let analysis: FormalityAnalysis
+    let variations: FormalityVariations
+}
+
 // MARK: - AI Service Manager
 
 @MainActor
@@ -219,6 +251,28 @@ class AIServiceManager: ObservableObject {
             endpoint: "generateInsights",
             request: request,
             responseType: InsightsResponse.self
+        )
+    }
+
+    // MARK: - Formality Adjustment
+
+    /// Analyze message formality and generate variations at different formality levels
+    func analyzeFormalityAndGenerate(
+        text: String
+    ) async throws -> FormalityResponse {
+        guard let userId = Auth.auth().currentUser?.uid else {
+            throw AIServiceError.notAuthenticated
+        }
+
+        let request = FormalityRequest(
+            text: text,
+            userId: userId
+        )
+
+        return try await callCloudFunction(
+            endpoint: "analyzeFormalityAndGenerate",
+            request: request,
+            responseType: FormalityResponse.self
         )
     }
 
