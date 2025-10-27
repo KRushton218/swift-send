@@ -11,11 +11,13 @@ struct MessageBubble: View {
     let currentUserId: String // Current user's ID for per-user translations
     let userNames: [String: String] // userId -> displayName
     let preferredLanguage: String // User's preferred language for translation
+    let showTranslationExtras: Bool // Show sparkles button for cultural context
     let isGroupChat: Bool // Whether this is a group chat
     var onRetry: ((Message) -> Void)? = nil // Callback for retry action
 
     @StateObject private var translationManager = TranslationManager.shared
     @State private var showTranslateButton = true
+    @State private var showTranslationDetails = false
 
     var body: some View {
         HStack {
@@ -45,15 +47,26 @@ struct MessageBubble: View {
                         Divider()
                             .background(Color.white.opacity(0.3))
 
-                        HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: "globe")
-                                .font(.caption2)
-                                .foregroundColor(isFromCurrentUser ? .white.opacity(0.8) : .secondary)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .top, spacing: 6) {
+                                Image(systemName: "globe")
+                                    .font(.caption2)
+                                    .foregroundColor(isFromCurrentUser ? .white.opacity(0.8) : .secondary)
 
-                            Text(translation.translatedText)
-                                .font(.body)
-                                .italic()
-                                .foregroundColor(isFromCurrentUser ? .white.opacity(0.9) : .secondary)
+                                Text(translation.translatedText)
+                                    .font(.body)
+                                    .italic()
+                                    .foregroundColor(isFromCurrentUser ? .white.opacity(0.9) : .secondary)
+
+                                // Details button (sparkles) if extras exist and user wants to see them
+                                if translation.hasExtras && showTranslationExtras {
+                                    Button(action: { showTranslationDetails = true }) {
+                                        Image(systemName: "sparkles")
+                                            .font(.caption)
+                                            .foregroundColor(isFromCurrentUser ? .white.opacity(0.8) : .blue)
+                                    }
+                                }
+                            }
                         }
                         .padding(.horizontal, 12)
                         .padding(.bottom, 8)
@@ -176,6 +189,18 @@ struct MessageBubble: View {
             }
         }
         .padding(.horizontal)
+        .sheet(isPresented: $showTranslationDetails) {
+            if let translation = translationManager.translations[message.id] {
+                TranslationDetailsSheet(
+                    originalText: message.text,
+                    translatedText: translation.translatedText,
+                    detectedLanguage: translation.detectedLanguage,
+                    targetLanguage: translation.targetLanguage,
+                    culturalNotes: translation.culturalNotes,
+                    slangExplanations: translation.slangExplanations
+                )
+            }
+        }
     }
 
     // MARK: - Actions

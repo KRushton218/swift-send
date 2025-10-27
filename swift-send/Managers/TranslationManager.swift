@@ -37,6 +37,12 @@ class TranslationManager: ObservableObject {
         let translatedText: String
         let detectedLanguage: String
         let targetLanguage: String
+        let culturalNotes: [String]?
+        let slangExplanations: [SlangExplanation]?
+
+        var hasExtras: Bool {
+            !(culturalNotes?.isEmpty ?? true) || !(slangExplanations?.isEmpty ?? true)
+        }
     }
 
     // Supported languages with display names
@@ -89,7 +95,9 @@ class TranslationManager: ObservableObject {
             translations[messageId] = TranslationData(
                 translatedText: response.translatedText,
                 detectedLanguage: response.detectedLanguage,
-                targetLanguage: targetLanguage
+                targetLanguage: targetLanguage,
+                culturalNotes: response.culturalNotes,
+                slangExplanations: response.slangExplanations
             )
 
             // Store in per-user RTDB location for persistence
@@ -99,7 +107,9 @@ class TranslationManager: ObservableObject {
                 messageId: messageId,
                 translatedText: response.translatedText,
                 detectedLanguage: response.detectedLanguage,
-                targetLanguage: targetLanguage
+                targetLanguage: targetLanguage,
+                culturalNotes: response.culturalNotes,
+                slangExplanations: response.slangExplanations
             )
 
             print("✅ [TranslationManager] Translation complete!")
@@ -120,17 +130,39 @@ class TranslationManager: ObservableObject {
         messageId: String,
         translatedText: String,
         detectedLanguage: String,
-        targetLanguage: String
+        targetLanguage: String,
+        culturalNotes: [String]?,
+        slangExplanations: [SlangExplanation]?
     ) async throws {
         let db = Database.database().reference()
         let translationRef = db.child("user_translations/\(userId)/\(messageId)")
 
-        let translationData: [String: Any] = [
+        var translationData: [String: Any] = [
             "translatedText": translatedText,
             "detectedLanguage": detectedLanguage,
             "targetLanguage": targetLanguage,
             "timestamp": ServerValue.timestamp()
         ]
+
+        // Add optional fields if present
+        if let culturalNotes = culturalNotes, !culturalNotes.isEmpty {
+            translationData["culturalNotes"] = culturalNotes
+        }
+
+        if let slangExplanations = slangExplanations, !slangExplanations.isEmpty {
+            // Convert to dictionary array for Firebase
+            let slangDicts = slangExplanations.map { slang -> [String: Any] in
+                var dict: [String: Any] = [
+                    "term": slang.term,
+                    "explanation": slang.explanation
+                ]
+                if let literal = slang.literal {
+                    dict["literal"] = literal
+                }
+                return dict
+            }
+            translationData["slangExplanations"] = slangDicts
+        }
 
         print("   RTDB path: user_translations/\(userId)/\(messageId)")
         print("   Data: \(translationData)")

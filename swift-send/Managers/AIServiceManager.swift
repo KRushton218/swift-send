@@ -2,7 +2,16 @@
 //  AIServiceManager.swift
 //  swift-send
 //
-//  Manager for calling Firebase Cloud Functions AI endpoints
+//  SERVICE LAYER - Cloud Functions HTTP Client
+//  ============================================
+//  Singleton HTTP client for Firebase Cloud Functions (AI/ML endpoints).
+//  Handles authentication (Firebase ID token), request/response serialization, error handling.
+//
+//  Endpoints:
+//  - translateMessage: Translate text to target language (uses Google Translate API)
+//  - generateEmbedding: Generate vector embeddings for semantic search (Pinecone)
+//  - semanticSearch: Query conversation messages semantically
+//  - generateInsights: RAG-based insights using conversation context
 //
 
 import Foundation
@@ -18,11 +27,19 @@ struct TranslateRequest: Codable {
     let userId: String
 }
 
+struct SlangExplanation: Codable {
+    let term: String
+    let explanation: String
+    let literal: String?
+}
+
 struct TranslateResponse: Codable {
     let translatedText: String
     let detectedLanguage: String
     let targetLanguage: String
     let fromCache: Bool
+    let culturalNotes: [String]?
+    let slangExplanations: [SlangExplanation]?
 }
 
 struct EmbeddingRequest: Codable {

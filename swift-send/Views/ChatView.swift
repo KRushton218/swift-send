@@ -29,6 +29,7 @@ struct ChatView: View {
     @State private var scrollProxy: ScrollViewProxy?  // View-only state for scrolling
     @State private var userNames: [String: String] = [:]  // View-only cache
     @State private var preferredLanguage: String = "en"  // View-only preference
+    @State private var showTranslationExtras: Bool = true  // Show sparkles for translation details
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,6 +68,7 @@ struct ChatView: View {
                                 currentUserId: viewModel.currentUserId,
                                 userNames: userNames,
                                 preferredLanguage: preferredLanguage,
+                                showTranslationExtras: showTranslationExtras,
                                 isGroupChat: viewModel.participants.count > 2,
                                 onRetry: { message in
                                     viewModel.retryMessage(message)
@@ -125,9 +127,10 @@ struct ChatView: View {
         .task {
             userNames = await viewModel.getReadByNames()
 
-            // Load user's preferred language
+            // Load user preferences
             if let prefs = try? await RealtimeManager.shared.getUserPreferences(userId: viewModel.currentUserId) {
                 preferredLanguage = prefs.preferredLanguage
+                showTranslationExtras = prefs.showTranslationExtras
             }
         }
         .onAppear {

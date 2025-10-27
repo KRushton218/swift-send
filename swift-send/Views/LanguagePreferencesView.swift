@@ -54,6 +54,14 @@ struct LanguagePreferencesView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+
+                Toggle("Show cultural context & slang", isOn: $preferences.showTranslationExtras)
+
+                if preferences.showTranslationExtras {
+                    Text("Display sparkles icon (✨) to view cultural context and slang explanations")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             } header: {
                 Text("Options")
             }

@@ -2,6 +2,22 @@
 //  RealtimeManager.swift
 //  swift-send
 //
+//  MVVM ARCHITECTURE - SERVICE LAYER
+//  ==================================
+//  Firebase Realtime Database gateway. Singleton providing async/await interface to Firebase.
+//  All Firebase operations go through this manager - no direct Firebase calls elsewhere.
+//
+//  Key Patterns:
+//  1. Observer pattern for real-time updates (observeMessages, observeConversations, etc.)
+//  2. Async/await throughout for clean async code
+//  3. Offline persistence enabled (writes queue automatically when offline)
+//  4. Server timestamps for clock skew protection (ServerValue.timestamp())
+//  5. Disconnect handlers for automatic cleanup (onDisconnectSetValue)
+//
+//  Usage:
+//  ViewModels call RealtimeManager methods which return data as Models.
+//  No business logic here - pure data access layer.
+//
 
 import Foundation
 import FirebaseDatabase
@@ -11,11 +27,11 @@ class RealtimeManager {
     static let shared = RealtimeManager()
     nonisolated private let db = Database.database().reference()
 
-    // Server time offset to handle clock skew (in milliseconds)
+    /// Server time offset in milliseconds (handles clock skew between client and server)
     private(set) var serverTimeOffset: TimeInterval = 0
 
     private init() {
-        // Sync server time offset on initialization
+        // Sync server time offset on init for accurate timestamp comparisons
         db.child(".info/serverTimeOffset").observe(.value) { [weak self] snapshot in
             if let offset = snapshot.value as? TimeInterval {
                 self?.serverTimeOffset = offset
@@ -86,16 +102,18 @@ class RealtimeManager {
 
     // MARK: - Presence
 
+    /// Sets user as online and configures Firebase disconnect handlers
+    /// Disconnect handlers automatically update presence when connection lost (app close, network failure)
     func setPresence(userId: String, name: String) async throws {
         let presenceData: [String: Any] = [
             "name": name,
             "isOnline": true,
-            "lastOnline": ServerValue.timestamp()
+            "lastOnline": ServerValue.timestamp()  // Server timestamp prevents clock skew
         ]
 
         try await db.child("presence").child(userId).setValue(presenceData)
 
-        // Set up disconnect handlers for when user loses connection
+        // Firebase disconnect handlers: auto-update when connection lost
         try await db.child("presence").child(userId).child("isOnline").onDisconnectSetValue(false)
         try await db.child("presence").child(userId).child("lastOnline").onDisconnectSetValue(ServerValue.timestamp())
     }
@@ -432,11 +450,13 @@ class RealtimeManager {
         let preferredLanguage = data["preferredLanguage"] as? String ?? "en"
         let autoTranslate = data["autoTranslate"] as? Bool ?? false
         let showLanguageBadges = data["showLanguageBadges"] as? Bool ?? true
+        let showTranslationExtras = data["showTranslationExtras"] as? Bool ?? true
 
         return UserPreferences(
             preferredLanguage: preferredLanguage,
             autoTranslate: autoTranslate,
-            showLanguageBadges: showLanguageBadges
+            showLanguageBadges: showLanguageBadges,
+            showTranslationExtras: showTranslationExtras
         )
     }
 
@@ -444,7 +464,8 @@ class RealtimeManager {
         let preferencesData: [String: Any] = [
             "preferredLanguage": preferences.preferredLanguage,
             "autoTranslate": preferences.autoTranslate,
-            "showLanguageBadges": preferences.showLanguageBadges
+            "showLanguageBadges": preferences.showLanguageBadges,
+            "showTranslationExtras": preferences.showTranslationExtras
         ]
 
         try await db.child("userPreferences").child(userId).setValue(preferencesData)
@@ -462,12 +483,22 @@ class RealtimeManager {
         }
     }
 
-    // MARK: - Remove Observers
+    // MARK: - Observer Lifecycle Management
 
+    /// CRITICAL: Remove observer to prevent memory leaks
+    /// Must be called in deinit with the SAME path used during registration
+    /// Each active observer maintains an open connection to Firebase until removed
+    ///
+    /// Pattern:
+    /// 1. Register: handle = observeMessages(...) → Store handle
+    /// 2. Use: Callback fires on data changes
+    /// 3. Cleanup: removeObserver(handle, path) in deinit
     nonisolated func removeObserver(handle: DatabaseHandle, path: String) {
         db.child(path).removeObserver(withHandle: handle)
     }
 
+    /// Nuclear option: removes ALL observers for entire database reference
+    /// Use sparingly - typically only on app termination
     nonisolated func removeAllObservers() {
         db.removeAllObservers()
     }
