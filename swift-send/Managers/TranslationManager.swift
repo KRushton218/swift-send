@@ -2,7 +2,18 @@
 //  TranslationManager.swift
 //  swift-send
 //
-//  Manager for handling message translations
+//  SERVICE LAYER - Translation Management
+//  =======================================
+//  Singleton managing message translation with dual-layer caching.
+//  Calls AIServiceManager (Cloud Functions) for translation, caches in-memory and Firebase.
+//
+//  Caching Strategy:
+//  1. In-memory cache (translations dict) - immediate UI updates
+//  2. Firebase persistence - survives app restart
+//
+//  Flow:
+//  User taps translate → Call Cloud Function → Store in memory → Store in Firebase
+//  Next app launch → Load from Firebase → Populate memory cache
 //
 
 import Foundation
@@ -13,9 +24,9 @@ import FirebaseDatabase
 class TranslationManager: ObservableObject {
     static let shared = TranslationManager()
 
-    @Published var isTranslating: [String: Bool] = [:] // messageId: isTranslating
-    @Published var translationErrors: [String: String] = [:] // messageId: error
-    @Published var translations: [String: TranslationData] = [:] // messageId: translation data
+    @Published var isTranslating: [String: Bool] = [:]  // messageId: loading state
+    @Published var translationErrors: [String: String] = [:]  // messageId: error message
+    @Published var translations: [String: TranslationData] = [:]  // messageId: cached translation
 
     private let aiService = AIServiceManager.shared
     private let realtimeManager = RealtimeManager.shared
@@ -42,16 +53,17 @@ class TranslationManager: ObservableObject {
         "ar": "Arabic"
     ]
 
-    /// Translate a message and store the result in RTDB
+    /// Translate a message and store the result in per-user RTDB location
     func translateMessage(
         _ message: Message,
-        to targetLanguage: String
+        to targetLanguage: String,
+        userId: String
     ) async throws {
         let messageId = message.id
 
         print("🔄 [TranslationManager] Starting translation")
         print("   MessageID: \(messageId)")
-        print("   ConversationID: \(message.conversationId)")
+        print("   UserID: \(userId)")
         print("   Target Language: \(targetLanguage)")
 
         // Set loading state
@@ -80,10 +92,10 @@ class TranslationManager: ObservableObject {
                 targetLanguage: targetLanguage
             )
 
-            // Also update RTDB for persistence
-            print("💾 [TranslationManager] Updating RTDB...")
-            try await updateMessageTranslation(
-                conversationId: message.conversationId,
+            // Store in per-user RTDB location for persistence
+            print("💾 [TranslationManager] Updating RTDB (per-user)...")
+            try await saveUserTranslation(
+                userId: userId,
                 messageId: messageId,
                 translatedText: response.translatedText,
                 detectedLanguage: response.detectedLanguage,
@@ -101,49 +113,46 @@ class TranslationManager: ObservableObject {
         }
     }
 
-    /// Update message translation fields in RTDB
-    private func updateMessageTranslation(
-        conversationId: String,
+    /// Save translation to per-user RTDB location
+    /// Path: user_translations/{userId}/{messageId}
+    private func saveUserTranslation(
+        userId: String,
         messageId: String,
         translatedText: String,
         detectedLanguage: String,
         targetLanguage: String
     ) async throws {
         let db = Database.database().reference()
-        let messageRef = db.child("conversations/\(conversationId)/messages/\(messageId)")
+        let translationRef = db.child("user_translations/\(userId)/\(messageId)")
 
-        let updates: [String: Any] = [
+        let translationData: [String: Any] = [
             "translatedText": translatedText,
             "detectedLanguage": detectedLanguage,
-            "translatedTo": targetLanguage
+            "targetLanguage": targetLanguage,
+            "timestamp": ServerValue.timestamp()
         ]
 
-        print("   RTDB path: conversations/\(conversationId)/messages/\(messageId)")
-        print("   Updates: \(updates)")
+        print("   RTDB path: user_translations/\(userId)/\(messageId)")
+        print("   Data: \(translationData)")
 
-        try await messageRef.updateChildValues(updates)
-        print("   ✅ RTDB update successful")
+        try await translationRef.setValue(translationData)
+        print("   ✅ User translation saved successfully")
     }
 
-    /// Clear translation for a message
+    /// Clear translation for a message (per-user)
     func clearTranslation(
-        conversationId: String,
+        userId: String,
         messageId: String
     ) async throws {
         // Remove from memory first for immediate UI update
         translations.removeValue(forKey: messageId)
 
-        // Also clear from RTDB
+        // Also clear from per-user RTDB location
         let db = Database.database().reference()
-        let messageRef = db.child("conversations/\(conversationId)/messages/\(messageId)")
+        let translationRef = db.child("user_translations/\(userId)/\(messageId)")
 
-        let updates: [String: Any?] = [
-            "translatedText": nil,
-            "detectedLanguage": nil,
-            "translatedTo": nil
-        ]
-
-        try await messageRef.updateChildValues(updates as [AnyHashable: Any])
+        try await translationRef.removeValue()
+        print("   ✅ User translation cleared from RTDB")
     }
 
     /// Get language display name

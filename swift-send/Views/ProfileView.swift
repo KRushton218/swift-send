@@ -37,6 +37,29 @@ struct ProfileView: View {
 
                 Spacer()
 
+                // Settings Section
+                VStack(spacing: 16) {
+                    NavigationLink(destination: LanguagePreferencesView()) {
+                        HStack {
+                            Image(systemName: "globe")
+                                .foregroundColor(.blue)
+                                .frame(width: 30)
+                            Text("Language & Translation")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.gray)
+                                .font(.caption)
+                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                    }
+                }
+                .padding(.horizontal)
+
+                Spacer()
+
                 // Sign Out Button
                 Button {
                     authManager.signOut()

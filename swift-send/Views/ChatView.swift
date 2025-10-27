@@ -2,15 +2,33 @@
 //  ChatView.swift
 //  swift-send
 //
+//  MVVM ARCHITECTURE - VIEW LAYER (Chat Screen)
+//  =============================================
+//  Main chat interface bound to ChatViewModel.
+//  Demonstrates multiple SwiftUI binding patterns.
+//
+//  Binding Patterns:
+//  1. @EnvironmentObject - App-wide state (authManager)
+//  2. @StateObject - Per-view ViewModel ownership (viewModel)
+//  3. @State - View-only state (scrollProxy, userNames)
+//  4. @Published → View - Read viewModel.messages, viewModel.isConnected, etc.
+//  5. $viewModel.messageText - Two-way binding with TextField
+//  6. View → ViewModel - Call viewModel.sendMessage(), viewModel.retryMessage()
+//
+//  Data Flow:
+//  User types → $viewModel.messageText updates → onChange fires → viewModel.onMessageTextChanged()
+//  User sends → viewModel.sendMessage() → optimistic UI → Firebase → observer updates messages
+//  Messages update → ForEach(viewModel.messages) re-renders → auto-scroll to bottom
+//
 
 import SwiftUI
 
 struct ChatView: View {
-    @EnvironmentObject var authManager: AuthManager
-    @StateObject var viewModel: ChatViewModel
-    @State private var scrollProxy: ScrollViewProxy?
-    @State private var userNames: [String: String] = [:]
-    @State private var preferredLanguage: String = "en" // Default to English
+    @EnvironmentObject var authManager: AuthManager  // App-wide auth state
+    @StateObject var viewModel: ChatViewModel  // Per-conversation ViewModel
+    @State private var scrollProxy: ScrollViewProxy?  // View-only state for scrolling
+    @State private var userNames: [String: String] = [:]  // View-only cache
+    @State private var preferredLanguage: String = "en"  // View-only preference
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,6 +64,7 @@ struct ChatView: View {
                             MessageBubble(
                                 message: message,
                                 isFromCurrentUser: message.senderId == viewModel.currentUserId,
+                                currentUserId: viewModel.currentUserId,
                                 userNames: userNames,
                                 preferredLanguage: preferredLanguage,
                                 isGroupChat: viewModel.participants.count > 2,

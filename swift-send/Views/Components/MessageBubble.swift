@@ -8,6 +8,7 @@ import SwiftUI
 struct MessageBubble: View {
     let message: Message
     let isFromCurrentUser: Bool
+    let currentUserId: String // Current user's ID for per-user translations
     let userNames: [String: String] // userId -> displayName
     let preferredLanguage: String // User's preferred language for translation
     let isGroupChat: Bool // Whether this is a group chat
@@ -184,7 +185,8 @@ struct MessageBubble: View {
             do {
                 try await translationManager.translateMessage(
                     message,
-                    to: preferredLanguage
+                    to: preferredLanguage,
+                    userId: currentUserId
                 )
             } catch {
                 print("Translation error: \(error)")
@@ -196,7 +198,7 @@ struct MessageBubble: View {
         Task {
             do {
                 try await translationManager.clearTranslation(
-                    conversationId: message.conversationId,
+                    userId: currentUserId,
                     messageId: message.id
                 )
             } catch {
